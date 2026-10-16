@@ -1,8 +1,8 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { SlideData, Rect, Point, HandleType, TextOverlay } from '../types';
-import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, PAN_STEP } from '../constants';
-import { canvasFont, loadFont } from '../services/fontService';
+import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM } from '../constants';
+import { drawOverlayText, loadFont, fontStack, resolveWeight } from '../services/fontService';
 
 interface EditorCanvasProps {
   slide: SlideData;
@@ -38,6 +38,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [fontsVersion, setFontsVersion] = useState(0);
 
+  // 더블클릭으로 캔버스 위에서 바로 글자를 고치는 중인 텍스트 상자
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editOriginalRef = useRef('');
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editingOverlay = slide.overlays.find(o => o.id === editingId);
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -56,22 +62,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         if (e.type === 'keydown') e.preventDefault();
         return;
       }
-
-      if (e.type === 'keydown' && !isInput) {
-        if (e.code === 'ArrowUp') {
-          setOffset(prev => ({ ...prev, y: prev.y + PAN_STEP }));
-          e.preventDefault();
-        } else if (e.code === 'ArrowDown') {
-          setOffset(prev => ({ ...prev, y: prev.y - PAN_STEP }));
-          e.preventDefault();
-        } else if (e.code === 'ArrowLeft') {
-          setOffset(prev => ({ ...prev, x: prev.x + PAN_STEP }));
-          e.preventDefault();
-        } else if (e.code === 'ArrowRight') {
-          setOffset(prev => ({ ...prev, x: prev.x - PAN_STEP }));
-          e.preventDefault();
-        }
-      }
+      // 방향키는 App 에서 선택한 텍스트 상자 위치 미세조정에 쓴다
     };
     window.addEventListener('keydown', handleKey);
     window.addEventListener('keyup', handleKey);
@@ -88,10 +79,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       setImage(img);
       if (containerRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
-        const scale = Math.min(
+        // 창이 아주 작으면 여백(80px)을 빼고 음수가 될 수 있어 최소 배율로 막는다
+        const scale = Math.max(MIN_ZOOM, Math.min(
           (clientWidth - 80) / img.width,
           (clientHeight - 80) / img.height
-        );
+        ));
         setZoom(scale);
         setOffset({
           x: (clientWidth - img.width * scale) / 2,
@@ -163,36 +155,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         ctx.strokeRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
       }
 
-      ctx.fillStyle = overlay.fontColor;
-      ctx.font = canvasFont(overlay.fontWeight, overlay.fontSize, overlay.fontFamily);
-      // Apply letter spacing
-      if (ctx.letterSpacing !== undefined) {
-        ctx.letterSpacing = `${overlay.letterSpacing || 0}px`;
-      }
-      
-      const lines = overlay.newText.split('\n');
-      const lineHeight = overlay.fontSize * 1.2;
-      const totalTextHeight = lines.length * lineHeight;
-
-      ctx.textAlign = (overlay.hAlign || 'left') as CanvasTextAlign;
-      ctx.textBaseline = 'top';
-
-      let tx = overlay.rect.x;
-      if (overlay.hAlign === 'center') tx = overlay.rect.x + overlay.rect.width / 2;
-      else if (overlay.hAlign === 'right') tx = overlay.rect.x + overlay.rect.width;
-
-      let ty = overlay.rect.y;
-      if (overlay.vAlign === 'middle') ty = overlay.rect.y + (overlay.rect.height - totalTextHeight) / 2;
-      else if (overlay.vAlign === 'bottom') ty = overlay.rect.y + overlay.rect.height - totalTextHeight;
-
-      lines.forEach((line, index) => {
-        ctx.fillText(line, tx, ty + index * lineHeight);
-      });
-      
-      // Reset letter spacing
-      if (ctx.letterSpacing !== undefined) {
-        ctx.letterSpacing = '0px';
-      }
+      if (overlay.id !== editingId) drawOverlayText(ctx, overlay); // 편집 중인 글자는 입력창이 대신 보여준다
     });
 
     if (selection) {
@@ -220,7 +183,64 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
 
     ctx.restore();
-  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion]);
+  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId]);
+
+  // 텍스트 상자가 선택되면(적용 직후 포함) 영역 선택 표시는 지운다 — 남아 있으면 상자를 옮겨도 파란 영역이 제자리에 보인다
+  useEffect(() => {
+    if (selectedOverlayId) setSelection(null);
+  }, [selectedOverlayId]);
+
+  // 다른 상자를 고르거나 슬라이드가 바뀌면 편집 종료
+  useEffect(() => {
+    if (editingId && (selectedOverlayId !== editingId || !editingOverlay)) setEditingId(null);
+  }, [selectedOverlayId, editingOverlay, editingId]);
+
+  useEffect(() => {
+    if (!editingId) return;
+    const el = editorRef.current;
+    if (el) { el.focus(); el.select(); }
+  }, [editingId]);
+
+  const startEditing = (overlay: TextOverlay) => {
+    editOriginalRef.current = overlay.newText;
+    onOverlaySelect(overlay.id);
+    setEditingId(overlay.id);
+  };
+
+  const updateEditingText = (text: string) => {
+    onUpdateOverlays(slide.overlays.map(o => (o.id === editingId ? { ...o, newText: text } : o)));
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const p = getCanvasCoords(e);
+    const hit = [...slide.overlays].reverse().find(o => isPointInRect(p, o.rect));
+    if (hit) startEditing(hit);
+  };
+
+  const editorStyle = (() => {
+    if (!editingOverlay) return undefined;
+    const ov = editingOverlay;
+    const size = ov.fontSize * zoom;
+    const lineCount = ov.newText.split('\n').length;
+    const textH = lineCount * size * 1.2;
+    const boxH = ov.rect.height * zoom;
+    const padTop = ov.vAlign === 'middle' ? Math.max(0, (boxH - textH) / 2) : ov.vAlign === 'bottom' ? Math.max(0, boxH - textH) : 0;
+    return {
+      left: offset.x + ov.rect.x * zoom,
+      top: offset.y + ov.rect.y * zoom,
+      width: ov.rect.width * zoom,
+      height: boxH,
+      paddingTop: padTop,
+      fontFamily: fontStack(ov.fontFamily),
+      fontWeight: resolveWeight(ov.fontFamily, ov.fontWeight).cssWeight,
+      fontSize: size,
+      lineHeight: 1.2,
+      letterSpacing: (ov.letterSpacing || 0) * zoom,
+      color: ov.fontColor,
+      background: ov.backgroundColor === 'rgba(0,0,0,0)' ? 'transparent' : ov.backgroundColor,
+      textAlign: (ov.hAlign || 'left') as React.CSSProperties['textAlign'],
+    } as React.CSSProperties;
+  })();
 
   useEffect(() => {
     draw();
@@ -230,7 +250,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   useEffect(() => {
     const onLoaded = () => setFontsVersion(v => v + 1);
     document.fonts.addEventListener('loadingdone', onLoaded);
-    return () => document.fonts.removeEventListener('loadingdone', onLoaded);
+    window.addEventListener('fontcalibrated', onLoaded); // 두께 보정 폭 측정이 끝났을 때
+    return () => {
+      document.fonts.removeEventListener('loadingdone', onLoaded);
+      window.removeEventListener('fontcalibrated', onLoaded);
+    };
   }, []);
 
   useEffect(() => {
@@ -389,10 +413,25 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#0f172a] flex items-center justify-center select-none">
-      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onContextMenu={(e) => e.preventDefault()} className="block w-full h-full" style={{ cursor: 'grab' }} />
+      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onContextMenu={(e) => e.preventDefault()} className="block w-full h-full" style={{ cursor: 'grab' }} />
+      {editingOverlay && (
+        <textarea
+          ref={editorRef}
+          value={editingOverlay.newText}
+          onChange={(e) => updateEditingText(e.target.value)}
+          onBlur={() => setEditingId(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { updateEditingText(editOriginalRef.current); setEditingId(null); }
+            else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) setEditingId(null);
+          }}
+          spellCheck={false}
+          className="absolute m-0 p-0 border-0 resize-none overflow-hidden outline outline-2 outline-blue-500 whitespace-pre"
+          style={editorStyle}
+        />
+      )}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-800/90 px-5 py-2.5 rounded-full text-xs font-medium text-slate-200 border border-slate-700 shadow-2xl pointer-events-none flex items-center gap-5 backdrop-blur-sm">
         <div className="flex items-center gap-2">
-          <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold">Drag / Arrows</span>
+          <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold">Drag</span>
           <span>이미지 이동</span>
         </div>
         <div className="w-px h-3 bg-slate-600"></div>

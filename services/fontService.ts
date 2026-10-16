@@ -9,24 +9,25 @@ export interface FontDef {
   hangul: boolean;     // 한글 글리프 포함 여부
   hint: string;        // AI에게 주는 생김새 설명
   css?: string;        // Google Fonts 가 아닌 경우 @font-face CSS 주소
+  variable?: [number, number]; // 가변 글꼴이면 연속으로 지원하는 두께 범위
 }
 
 export const FONT_CATALOG: FontDef[] = [
-  { id: 'Pretendard Variable', name: '프리텐다드', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], hangul: true, hint: 'modern neutral geometric-grotesque sans, very common in Korean UI and slides', css: 'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css' },
+  { id: 'Pretendard Variable', name: '프리텐다드', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], variable: [100, 900], hangul: true, hint: 'modern neutral geometric-grotesque sans, very common in Korean UI and slides', css: 'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css' },
   { id: 'NanumSquare', name: '나눔스퀘어', category: 'sans', weights: [300, 400, 700, 800], hangul: true, hint: 'squarish geometric gothic with flat horizontal strokes, popular for presentation titles', css: 'https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css' },
-  { id: 'SUIT Variable', name: 'SUIT', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], hangul: true, hint: 'clean modern sans with slightly narrow hangul', css: 'https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css' },
+  { id: 'SUIT Variable', name: 'SUIT', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], variable: [100, 900], hangul: true, hint: 'clean modern sans with slightly narrow hangul', css: 'https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css' },
   { id: 'Spoqa Han Sans Neo', name: '스포카 한 산스 Neo', category: 'sans', weights: [300, 400, 500, 700], hangul: true, hint: 'compact modern gothic with tight, even hangul', css: 'https://spoqa.github.io/spoqa-han-sans/css/SpoqaHanSansNeo.css' },
-  { id: 'Wanted Sans Variable', name: '원티드 산스', category: 'sans', weights: [400, 500, 600, 700, 800, 900], hangul: true, hint: 'contemporary grotesque sans with crisp hangul', css: 'https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css' },
-  { id: 'Noto Sans KR', name: '본고딕 (Noto Sans KR)', category: 'sans', weights: [300, 400, 500, 700, 900], hangul: true, hint: 'standard clean gothic sans (Source Han Sans), used by Google products and NotebookLM' },
+  { id: 'Wanted Sans Variable', name: '원티드 산스', category: 'sans', weights: [400, 500, 600, 700, 800, 900, 1000], variable: [400, 1000], hangul: true, hint: 'contemporary grotesque sans with crisp hangul', css: 'https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css' },
+  { id: 'Noto Sans KR', name: '본고딕 (Noto Sans KR)', category: 'sans', weights: [300, 400, 500, 700, 900], variable: [100, 900], hangul: true, hint: 'standard clean gothic sans (Source Han Sans), used by Google products and NotebookLM' },
   { id: 'Nanum Gothic', name: '나눔고딕', category: 'sans', weights: [400, 700, 800], hangul: true, hint: 'classic rounded-ish gothic sans, slightly wider, older look' },
   { id: 'Gothic A1', name: 'Gothic A1', category: 'sans', weights: [300, 400, 500, 700, 900], hangul: true, hint: 'neutral gothic sans with compact proportions' },
   { id: 'IBM Plex Sans KR', name: 'IBM Plex Sans KR', category: 'sans', weights: [300, 400, 500, 700], hangul: true, hint: 'technical sans with angular latin and slightly square hangul' },
   { id: 'Gowun Dodum', name: '고운돋움', category: 'sans', weights: [400], hangul: true, hint: 'soft humanist sans with gentle curves' },
   { id: 'Sunflower', name: 'Sunflower', category: 'sans', weights: [300, 500, 700], hangul: true, hint: 'tall condensed sans with narrow letters' },
-  { id: 'Noto Serif KR', name: '본명조 (Noto Serif KR)', category: 'serif', weights: [400, 600, 700, 900], hangul: true, hint: 'standard myeongjo serif with brush-like stroke ends' },
+  { id: 'Noto Serif KR', name: '본명조 (Noto Serif KR)', category: 'serif', weights: [400, 600, 700, 900], variable: [200, 900], hangul: true, hint: 'standard myeongjo serif with brush-like stroke ends' },
   { id: 'Nanum Myeongjo', name: '나눔명조', category: 'serif', weights: [400, 700, 800], hangul: true, hint: 'classic thin myeongjo serif, high contrast' },
   { id: 'Gowun Batang', name: '고운바탕', category: 'serif', weights: [400, 700], hangul: true, hint: 'soft calligraphic batang serif' },
-  { id: 'Hahmlet', name: '함렛', category: 'serif', weights: [400, 700], hangul: true, hint: 'contemporary serif with sharp wedges' },
+  { id: 'Hahmlet', name: '함렛', category: 'serif', weights: [400, 700], variable: [100, 900], hangul: true, hint: 'contemporary serif with sharp wedges' },
   { id: 'Song Myung', name: '송명', category: 'serif', weights: [400], hangul: true, hint: 'traditional heavy-ended myeongjo, old print style' },
   { id: 'Black Han Sans', name: '검은고딕', category: 'display', weights: [400], hangul: true, hint: 'extremely heavy, blocky headline gothic' },
   { id: 'Do Hyeon', name: '도현체', category: 'display', weights: [400], hangul: true, hint: 'bold, squared, condensed headline font (Baemin style)' },
@@ -38,8 +39,8 @@ export const FONT_CATALOG: FontDef[] = [
   { id: 'Gaegu', name: '개구체', category: 'hand', weights: [300, 400, 700], hangul: true, hint: 'playful childlike handwriting' },
   { id: 'Hi Melody', name: '하이멜로디', category: 'hand', weights: [400], hangul: true, hint: 'neat rounded handwriting' },
   { id: 'Nanum Gothic Coding', name: '나눔고딕코딩', category: 'mono', weights: [400, 700], hangul: true, hint: 'monospaced gothic for code' },
-  { id: 'Inter', name: 'Inter', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], hangul: false, hint: 'latin-only neutral UI sans' },
-  { id: 'Roboto', name: 'Roboto', category: 'sans', weights: [300, 400, 500, 700, 900], hangul: false, hint: 'latin-only Google/Android sans' },
+  { id: 'Inter', name: 'Inter', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], variable: [100, 900], hangul: false, hint: 'latin-only neutral UI sans' },
+  { id: 'Roboto', name: 'Roboto', category: 'sans', weights: [300, 400, 500, 700, 900], variable: [100, 900], hangul: false, hint: 'latin-only Google/Android sans' },
 ];
 
 const GENERIC = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui']);
@@ -56,6 +57,195 @@ export const fontStack = (family: string) => {
 export const canvasFont = (weight: string | number, size: number, family: string) =>
   `${weight} ${size}px ${fontStack(family)}`;
 
+// ---------- 두께 미세조정 ----------
+
+export const MIN_WEIGHT = 100;
+export const MAX_WEIGHT = 1000;
+
+export const parseWeight = (weight: string | number) => {
+  if (weight === 'bold') return 700;
+  const n = typeof weight === 'number' ? weight : parseInt(weight, 10);
+  return Number.isFinite(n) ? n : 400;
+};
+
+/**
+ * 요청한 두께를 실제로 그릴 방법으로 바꾼다.
+ * - 가변 글꼴: 범위 안에서는 그 값 그대로
+ * - 고정 두께 글꼴: 요청값 이하에서 가장 가까운 두께로 그리고, 모자란 만큼은 글자 외곽선으로 덧칠
+ * 그래서 어떤 글꼴이든 슬라이더로 10 단위까지 굵기를 맞출 수 있다.
+ */
+export const resolveWeight = (family: string, weight: string | number): { cssWeight: number; extra: number; next?: number; prev?: number } => {
+  const target = parseWeight(weight);
+  const def = getFontDef(family);
+  if (!def) return { cssWeight: target, extra: 0 };
+  if (def.variable) {
+    const [min, max] = def.variable;
+    const css = Math.min(max, Math.max(min, target));
+    // 최대치를 넘는 부분은 외곽선으로 보정 — 마지막 100 구간의 굵기 변화로 보정 폭을 잰다
+    return { cssWeight: css, extra: Math.max(0, target - css), prev: target > max ? max - 100 : undefined };
+  }
+  const sorted = [...def.weights].sort((a, b) => a - b);
+  const base = [...sorted].reverse().find(w => w <= target) ?? sorted[0];
+  const next = sorted.find(w => w > base);
+  const prev = [...sorted].reverse().find(w => w < base);
+  return { cssWeight: base, extra: Math.max(0, target - base), next, prev };
+};
+
+/**
+ * 고정 두께 글꼴의 "한 단계 위 두께"를 외곽선 몇 px 로 흉내낼 수 있는지 실제로 그려서 잰다.
+ * 결과: 글자 크기 1px 당, 두께 1 당 외곽선 폭. 글꼴마다 획 구조가 달라 고정 비율로는 어긋난다.
+ */
+const strokeCalib = new Map<string, number>();
+const DEFAULT_STROKE_PER_WEIGHT = 0.016 / 100;
+const CALIB_TEXT = '가나다라마바사아자차';
+
+const inkAmount = (family: string, weight: number, stroke: number) => {
+  const size = 100;
+  const c = document.createElement('canvas');
+  c.width = size * CALIB_TEXT.length + 40;
+  c.height = size * 1.5;
+  const ctx = c.getContext('2d')!;
+  ctx.font = canvasFont(weight, size, family);
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = ctx.strokeStyle = '#000';
+  ctx.fillText(CALIB_TEXT, 20, 20);
+  if (stroke > 0) {
+    ctx.lineWidth = stroke;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(CALIB_TEXT, 20, 20);
+  }
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  let s = 0;
+  for (let i = 3; i < d.length; i += 4) s += d[i];
+  return s / 255;
+};
+
+const calibrate = (family: string, base: number, next: number) => {
+  const key = `${family}|${base}`;
+  if (strokeCalib.has(key)) return;
+  const inkBase = inkAmount(family, base, 0);
+  const inkNext = inkAmount(family, next, 0);
+  const perPx = (inkAmount(family, base, 4) - inkBase) / 4; // 외곽선 1px 당 늘어나는 잉크
+  if (perPx <= 0 || inkNext <= inkBase) return;
+  const strokePx = (inkNext - inkBase) / perPx;              // 100px 글자에서 base → next 에 필요한 폭
+  strokeCalib.set(key, strokePx / 100 / (next - base));
+  window.dispatchEvent(new Event('fontcalibrated'));
+};
+
+const strokePerWeight = (family: string, cssWeight: number, prev?: number) =>
+  strokeCalib.get(`${family}|${cssWeight}`)
+  ?? (prev !== undefined ? strokeCalib.get(`${family}|${prev}`) : undefined)
+  ?? DEFAULT_STROKE_PER_WEIGHT;
+
+const extraStrokeWidth = (family: string, weight: string | number, fontSize: number) => {
+  const { cssWeight, extra, prev } = resolveWeight(family, weight);
+  return extra > 0 ? extra * fontSize * strokePerWeight(family, cssWeight, prev) : 0;
+};
+
+export interface TextStyle {
+  newText: string;
+  fontSize: number;
+  fontWeight: string;
+  fontColor: string;
+  fontFamily: string;
+  letterSpacing?: number;
+  hAlign?: 'left' | 'center' | 'right';
+  vAlign?: 'top' | 'middle' | 'bottom';
+  rect: { x: number; y: number; width: number; height: number };
+  pixelScale?: number; // 1 = 원래 해상도, 0.5 = 절반 해상도로 그린 뒤 키움 (원본 이미지의 뭉개진 글자에 맞추기)
+}
+
+// 픽셀 조절의 실제 최저 배율. 슬라이더 0~100% 가 이 값~100% 에 대응한다
+export const PIXEL_SCALE_MIN = 0.97;
+
+// 편집 화면·이미지 저장·PDF 저장이 모두 이 함수로 글자를 그린다
+export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
+  const scale = Math.min(1, Math.max(PIXEL_SCALE_MIN, ov.pixelScale ?? 1));
+  if (scale >= 1) return drawTextCrisp(ctx, ov);
+
+  // 100%에 아주 가까운 배율은 픽셀 격자와 맞물리는 위치에 따라 뭉개짐이 들쭉날쭉하다.
+  // 그래서 "원래 해상도"와 "최저 배율(97%)" 두 장을 그려 비율대로 섞는다 → 슬라이더에 비례해 고르게 변한다.
+  const t = (scale - PIXEL_SCALE_MIN) / (1 - PIXEL_SCALE_MIN); // 1 = 원래 해상도, 0 = 97%
+
+  // 상자보다 글자가 삐져나올 수 있어 글자 크기만큼 여유를 두고, 정수 좌표에 맞춰 1:1 로 붙인다
+  const pad = Math.ceil(ov.fontSize);
+  const ox = Math.floor(ov.rect.x - pad);
+  const oy = Math.floor(ov.rect.y - pad);
+  const W = Math.ceil(ov.rect.x + ov.rect.width + pad) - ox;
+  const H = Math.ceil(ov.rect.y + ov.rect.height + pad) - oy;
+  const layer = (draw: (c: CanvasRenderingContext2D) => void) => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    draw(c.getContext('2d')!);
+    return c;
+  };
+
+  // 저해상도: 97% 크기로 그린 뒤 원래 크기로 부드럽게 키운다
+  const s = PIXEL_SCALE_MIN;
+  const small = document.createElement('canvas');
+  small.width = Math.ceil(W * s);
+  small.height = Math.ceil(H * s);
+  const sctx = small.getContext('2d')!;
+  sctx.scale(s, s);
+  sctx.translate(-ox, -oy);
+  drawTextCrisp(sctx, ov);
+  const soft = layer(c => {
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(small, 0, 0, W * s, H * s, 0, 0, W, H);
+  });
+
+  // 'lighter' 합성은 (미리 곱한 알파 기준) 더하기라, 가중치 t / 1-t 로 그리면 정확한 선형 혼합이 된다
+  const mixed = layer(c => {
+    c.globalCompositeOperation = 'lighter';
+    if (t > 0) {
+      const crisp = layer(cc => { cc.translate(-ox, -oy); drawTextCrisp(cc, ov); });
+      c.globalAlpha = t;
+      c.drawImage(crisp, 0, 0);
+    }
+    c.globalAlpha = 1 - t;
+    c.drawImage(soft, 0, 0);
+  });
+
+  ctx.drawImage(mixed, ox, oy);
+};
+
+const drawTextCrisp = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
+  const { cssWeight } = resolveWeight(ov.fontFamily, ov.fontWeight);
+  ctx.save();
+  ctx.fillStyle = ov.fontColor;
+  ctx.font = canvasFont(cssWeight, ov.fontSize, ov.fontFamily);
+  if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
+
+  const lines = ov.newText.split('\n');
+  const lineHeight = ov.fontSize * 1.2;
+  const totalTextHeight = lines.length * lineHeight;
+
+  ctx.textAlign = (ov.hAlign || 'left') as CanvasTextAlign;
+  ctx.textBaseline = 'top';
+
+  let tx = ov.rect.x;
+  if (ov.hAlign === 'center') tx = ov.rect.x + ov.rect.width / 2;
+  else if (ov.hAlign === 'right') tx = ov.rect.x + ov.rect.width;
+
+  let ty = ov.rect.y;
+  if (ov.vAlign === 'middle') ty = ov.rect.y + (ov.rect.height - totalTextHeight) / 2;
+  else if (ov.vAlign === 'bottom') ty = ov.rect.y + ov.rect.height - totalTextHeight;
+
+  const stroke = extraStrokeWidth(ov.fontFamily, ov.fontWeight, ov.fontSize);
+  if (stroke > 0) {
+    ctx.strokeStyle = ov.fontColor;
+    ctx.lineWidth = stroke;
+    ctx.lineJoin = 'round';
+  }
+  lines.forEach((line, index) => {
+    ctx.fillText(line, tx, ty + index * lineHeight);
+    if (stroke > 0) ctx.strokeText(line, tx, ty + index * lineHeight);
+  });
+  ctx.restore();
+};
+
 // ---------- 폰트 CSS 로드 ----------
 
 const googleFontsUrl = () => {
@@ -63,6 +253,7 @@ const googleFontsUrl = () => {
     .filter(f => !f.css)
     .map(f => {
       const fam = f.id.replace(/ /g, '+');
+      if (f.variable) return `family=${fam}:wght@${f.variable[0]}..${f.variable[1]}`;
       return f.weights.length === 1 && f.weights[0] === 400 ? `family=${fam}` : `family=${fam}:wght@${f.weights.join(';')}`;
     });
   return `https://fonts.googleapis.com/css2?${families.join('&')}&display=swap`;
@@ -90,7 +281,17 @@ export const loadFont = async (family: string, weight: string | number = 400, te
   if (GENERIC.has(family)) return;
   await ensureFontCss();
   try {
-    await document.fonts.load(canvasFont(weight, 32, family), text || '가A');
+    const { cssWeight, extra, next, prev } = resolveWeight(family, weight);
+    await document.fonts.load(canvasFont(cssWeight, 32, family), text || '가A');
+    // 고정 두께 사이 값이면 위·아래 단계를 불러와 외곽선 보정 폭을 잰다
+    if (extra > 0) {
+      const upper = next ?? cssWeight;
+      const lower = next !== undefined ? cssWeight : prev;
+      if (lower !== undefined && upper > lower) {
+        await Promise.all([lower, upper].map(w => document.fonts.load(canvasFont(w, 32, family), CALIB_TEXT)));
+        calibrate(family, lower, upper);
+      }
+    }
   } catch (e) {
     console.warn('Font load failed', family, e);
   }

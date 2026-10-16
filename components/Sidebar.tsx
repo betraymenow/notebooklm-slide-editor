@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
-import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet } from '../services/fontService';
+import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, MIN_WEIGHT, MAX_WEIGHT, PIXEL_SCALE_MIN } from '../services/fontService';
 import { 
   Loader2, 
   Type as TypeIcon, 
@@ -18,7 +18,8 @@ import {
   AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
-  MoveHorizontal
+  MoveHorizontal,
+  Trash2
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -27,6 +28,7 @@ interface SidebarProps {
   selectedOverlayId: string | null;
   onApplyOverlay: (overlay: TextOverlay) => void;
   onUpdateOverlays: (overlays: TextOverlay[]) => void;
+  onDeleteOverlay: (id: string) => void;
 }
 
 const FONT_GROUPS: { label: string; category: FontDef['category'] }[] = [
@@ -39,7 +41,7 @@ const FONT_GROUPS: { label: string; category: FontDef['category'] }[] = [
 
 const WEIGHT_LABELS: Record<string, string> = {
   '100': 'Thin', '200': 'ExtraLight', '300': 'Light', '400': 'Regular', '500': 'Medium',
-  '600': 'SemiBold', '700': 'Bold', '800': 'ExtraBold', '900': 'Black', normal: 'Regular', bold: 'Bold',
+  '600': 'SemiBold', '700': 'Bold', '800': 'ExtraBold', '900': 'Black', '1000': 'ExtraBlack', normal: 'Regular', bold: 'Bold',
 };
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -47,7 +49,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   selection, 
   selectedOverlayId,
   onApplyOverlay,
-  onUpdateOverlays
+  onUpdateOverlays,
+  onDeleteOverlay
 }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
@@ -65,6 +68,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [vAlign, setVAlign] = useState<VerticalAlign>('top');
   const [hAlign, setHAlign] = useState<HorizontalAlign>('left');
   const [letterSpacing, setLetterSpacing] = useState(0);
+  const [pixelScale, setPixelScale] = useState(1); // 실제 해상도 배율, 1 = 원래 해상도
+
+  // 픽셀 조절 슬라이더 0~100% 는 실제 배율 97~100% 에 대응 (미세한 차이만 필요해서 이 구간을 넓게 펼친다)
+  const sliderToPixelScale = (v: number) => PIXEL_SCALE_MIN + (1 - PIXEL_SCALE_MIN) * (v / 100);
+  const pixelSlider = Math.round(Math.min(100, Math.max(0, ((pixelScale - PIXEL_SCALE_MIN) / (1 - PIXEL_SCALE_MIN)) * 100)));
 
   // 배경 관련 상태
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -93,17 +101,18 @@ const Sidebar: React.FC<SidebarProps> = ({
       setVAlign(selectedOverlay.vAlign || 'top');
       setHAlign(selectedOverlay.hAlign || 'left');
       setLetterSpacing(selectedOverlay.letterSpacing || 0);
-      
+      setPixelScale(selectedOverlay.pixelScale ?? 1);
+
       const bg = selectedOverlay.backgroundColor;
       if (bg === 'rgba(0,0,0,0)' || bg === 'transparent') {
         setIsTransparent(true);
-        setBackgroundColor('#ffffff');
       } else {
         setIsTransparent(false);
         setBackgroundColor(bg || '#ffffff');
       }
     }
-  }, [selectedOverlayId]);
+    // 상자 자체가 바뀔 때마다(다른 상자 선택, 캔버스에서 더블클릭 수정, 실행 취소) 입력란을 맞춘다
+  }, [selectedOverlayId, selectedOverlay]);
 
   // 로컬 캔버스에서 주변 배경색 추출 (Mode 알고리즘 사용)
   const detectBackgroundColor = useCallback((ctx: CanvasRenderingContext2D, width: number, height: number): string => {
@@ -329,10 +338,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const weightOptions = (() => {
-    const list = (getFontDef(fontFamily)?.weights || [400, 700]).map(String);
-    return list.includes(fontWeight) ? list : [fontWeight, ...list];
-  })();
+  const weightValue = parseWeight(fontWeight);
+  const fontDef = getFontDef(fontFamily);
+  const weightLabel = WEIGHT_LABELS[String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(weightValue / 100) * 100)))];
+
+  const changeWeight = (value: number) => {
+    const w = String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(value / 10) * 10)));
+    setFontWeight(w);
+    loadFont(fontFamily, w, replacementText);
+    if (isEditing) updateSelectedOverlay({ fontWeight: w });
+    return w;
+  };
 
   const updateSelectedOverlay = (updates: Partial<TextOverlay>) => {
     if (!selectedOverlayId || !activeSlide) return;
@@ -356,7 +372,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       backgroundColor: isTransparent ? 'rgba(0,0,0,0)' : backgroundColor,
       vAlign,
       hAlign,
-      letterSpacing
+      letterSpacing,
+      pixelScale
     });
   };
 
@@ -369,7 +386,21 @@ const Sidebar: React.FC<SidebarProps> = ({
           <TypeIcon size={16} className="text-blue-400" />
           {isEditing ? '텍스트 수정' : '텍스트 교체'}
         </h2>
+        {isEditing && selectedOverlayId && (
+          <button
+            onClick={() => onDeleteOverlay(selectedOverlayId)}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-slate-400 hover:text-rose-400 hover:bg-rose-900/20 transition-colors"
+            title="텍스트 상자 삭제 (Delete)"
+          >
+            <Trash2 size={13} /> 삭제
+          </button>
+        )}
       </div>
+      {isEditing && (
+        <p className="-mt-4 mb-5 text-[11px] text-slate-500 leading-relaxed">
+          글자를 더블클릭하면 그 자리에서 바로 고칠 수 있어요. <span className="text-slate-400">방향키</span>로 1px, <span className="text-slate-400">Shift+방향키</span>로 10px씩 옮기고, <span className="text-slate-400">Delete</span> 키로 삭제해요.
+        </p>
+      )}
 
       {!selection && !isEditing ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400">
@@ -485,13 +516,11 @@ const Sidebar: React.FC<SidebarProps> = ({
               <select 
                 value={fontFamily}
                 onChange={(e) => {
+                  // 두께는 슬라이더 값을 그대로 유지 (고정 두께 글꼴은 그리는 쪽에서 보정)
                   const family = e.target.value;
-                  const weights = (getFontDef(family)?.weights || [400]).map(String);
-                  const weight = weights.includes(fontWeight) ? fontWeight : weights.includes('400') ? '400' : weights[0];
                   setFontFamily(family);
-                  setFontWeight(weight);
-                  loadFont(family, weight, replacementText);
-                  if (isEditing) updateSelectedOverlay({ fontFamily: family, fontWeight: weight });
+                  loadFont(family, fontWeight, replacementText);
+                  if (isEditing) updateSelectedOverlay({ fontFamily: family });
                 }}
                 style={{ fontFamily: fontStack(fontFamily) }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
@@ -578,23 +607,83 @@ const Sidebar: React.FC<SidebarProps> = ({
                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">두께</label>
-                <select
-                  value={fontWeight}
-                  onChange={(e) => {
-                    const weight = e.target.value;
-                    setFontWeight(weight);
-                    loadFont(fontFamily, weight, replacementText);
-                    if (isEditing) updateSelectedOverlay({ fontWeight: weight });
-                  }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
-                >
-                  {weightOptions.map(w => <option key={w} value={w}>{WEIGHT_LABELS[w] || w} ({w})</option>)}
-                </select>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400">{weightLabel}</span>
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 (한 글자마다 범위 보정되면 입력이 안 됨) */}
+                  <input
+                    key={weightValue}
+                    type="number"
+                    min={MIN_WEIGHT}
+                    max={MAX_WEIGHT}
+                    step={10}
+                    defaultValue={weightValue}
+                    onBlur={(e) => { const v = parseInt(e.target.value, 10); e.target.value = Number.isFinite(v) ? changeWeight(v) : String(weightValue); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
+              <input
+                type="range"
+                min={MIN_WEIGHT}
+                max={MAX_WEIGHT}
+                step={10}
+                value={weightValue}
+                onChange={(e) => changeWeight(Number(e.target.value))}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="글자 두께"
+              />
+              {/* 글꼴이 원래 가진 두께 위치 — 누르면 그 값으로 맞춘다 */}
+              <div className="relative h-4 mx-[7px]">
+                {(fontDef?.weights || []).map(w => (
+                  <button
+                    key={w}
+                    onClick={() => changeWeight(w)}
+                    title={`${WEIGHT_LABELS[String(w)] || w} (${w})`}
+                    className={`absolute -translate-x-1/2 top-0 w-2 h-2 rounded-full transition-colors ${w === weightValue ? 'bg-blue-400' : 'bg-slate-600 hover:bg-slate-400'}`}
+                    style={{ left: `${((w - MIN_WEIGHT) / (MAX_WEIGHT - MIN_WEIGHT)) * 100}%` }}
+                  />
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 leading-snug">
+                {fontDef?.variable
+                  ? '가변 글꼴이라 모든 값이 그대로 적용돼요.'
+                  : '점은 글꼴의 기본 두께예요. 사이 값은 획을 덧칠해 보정해요.'}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">픽셀 조절</label>
+                <span className="text-xs text-slate-300 tabular-nums">
+                  {pixelSlider}%
+                  <span className="text-slate-500"> · {pixelScale >= 1 ? '원래 해상도' : `실제 ${(pixelScale * 100).toFixed(2)}%`}</span>
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={pixelSlider}
+                onChange={(e) => {
+                  const v = sliderToPixelScale(Number(e.target.value));
+                  setPixelScale(v);
+                  if (isEditing) updateSelectedOverlay({ pixelScale: v });
+                }}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="픽셀 조절"
+              />
+              <p className="text-[10px] text-slate-500 leading-snug">
+                낮출수록 글자를 낮은 해상도로 그려서 원본 이미지의 뭉개진 글자처럼 보여요. 0%가 실제 해상도 97%예요.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2 col-span-2">
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">자간 (Spacing)</label>
                 <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg px-2">
                   <MoveHorizontal size={14} className="text-slate-500 mr-2" />

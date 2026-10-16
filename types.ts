@@ -27,6 +27,7 @@ export interface TextOverlay {
   vAlign: VerticalAlign;
   hAlign: HorizontalAlign;
   letterSpacing?: number;
+  pixelScale?: number; // 1 = 원래 해상도, 낮출수록 저해상도처럼 뭉개짐
 }
 
 export interface SlideData {

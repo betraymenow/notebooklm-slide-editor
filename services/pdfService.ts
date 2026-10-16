@@ -1,6 +1,6 @@
 
 import { SlideData } from '../types';
-import { canvasFont, loadFont } from './fontService';
+import { drawOverlayText, loadFont } from './fontService';
 
 declare const pdfjsLib: any;
 declare const jspdf: any;
@@ -61,35 +61,7 @@ export const downloadAsPdf = (slides: SlideData[], filename: string) => {
       ctx.fillStyle = overlay.backgroundColor;
       ctx.fillRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
       
-      ctx.fillStyle = overlay.fontColor;
-      ctx.font = canvasFont(overlay.fontWeight, overlay.fontSize, overlay.fontFamily);
-      
-      if (ctx.letterSpacing !== undefined) {
-        ctx.letterSpacing = `${overlay.letterSpacing || 0}px`;
-      }
-
-      const lines = overlay.newText.split('\n');
-      const lineHeight = overlay.fontSize * 1.2;
-      const totalTextHeight = lines.length * lineHeight;
-
-      ctx.textAlign = (overlay.hAlign || 'left') as CanvasTextAlign;
-      ctx.textBaseline = 'top';
-
-      let tx = overlay.rect.x;
-      if (overlay.hAlign === 'center') tx = overlay.rect.x + overlay.rect.width / 2;
-      else if (overlay.hAlign === 'right') tx = overlay.rect.x + overlay.rect.width;
-
-      let ty = overlay.rect.y;
-      if (overlay.vAlign === 'middle') ty = overlay.rect.y + (overlay.rect.height - totalTextHeight) / 2;
-      else if (overlay.vAlign === 'bottom') ty = overlay.rect.y + overlay.rect.height - totalTextHeight;
-
-      lines.forEach((line, index) => {
-        ctx.fillText(line, tx, ty + index * lineHeight);
-      });
-      
-      if (ctx.letterSpacing !== undefined) {
-        ctx.letterSpacing = '0px';
-      }
+      drawOverlayText(ctx, overlay);
     });
     
     const finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);

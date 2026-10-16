@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SlideData, Rect, TextOverlay } from './types';
 import { convertPdfToImages, downloadAsPdf } from './services/pdfService';
 import EditorCanvas from './components/EditorCanvas';
 import Sidebar from './components/Sidebar';
-import { canvasFont, loadFont } from './services/fontService';
+import { drawOverlayText, loadFont } from './services/fontService';
+import { NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
   Download, 
@@ -16,6 +17,10 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 
+const ARROW_DELTA: Record<string, [number, number]> = {
+  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+};
+
 const App: React.FC = () => {
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
@@ -23,6 +28,45 @@ const App: React.FC = () => {
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // ---------- 실행 취소 기록 ----------
+  // 바뀌기 전 슬라이드 상태를 쌓아 두고 Ctrl+Z 때 하나씩 되돌린다
+  const slidesRef = useRef(slides);
+  slidesRef.current = slides;
+  const historyRef = useRef<{ slides: SlideData[]; slideIdx: number }[]>([]);
+  const lastChangeRef = useRef({ key: '', time: 0 });
+  const [canUndo, setCanUndo] = useState(false);
+
+  /**
+   * 슬라이드를 바꾸면서 직전 상태를 기록한다.
+   * coalesce: 드래그·슬라이더·타이핑처럼 연속으로 들어오는 변경은 1초 안이면 한 번으로 묶는다.
+   */
+  const commitSlides = (next: (prev: SlideData[]) => SlideData[], key: string, coalesce = false) => {
+    const prev = slidesRef.current;
+    const now = Date.now();
+    const last = lastChangeRef.current;
+    if (!(coalesce && last.key === key && now - last.time < 1000)) {
+      historyRef.current.push({ slides: prev, slideIdx: activeSlideIdx });
+      if (historyRef.current.length > 100) historyRef.current.shift();
+      setCanUndo(true);
+    }
+    lastChangeRef.current = { key, time: now };
+    const updated = next(prev);
+    slidesRef.current = updated; // 같은 틱에 연달아 호출돼도 이어서 적용되도록
+    setSlides(updated);
+  };
+
+  const handleUndo = () => {
+    const entry = historyRef.current.pop();
+    if (!entry) return;
+    slidesRef.current = entry.slides;
+    setSlides(entry.slides);
+    setActiveSlideIdx(entry.slideIdx);
+    lastChangeRef.current = { key: '', time: 0 };
+    setCanUndo(historyRef.current.length > 0);
+    const restored = entry.slides[entry.slideIdx];
+    if (!restored?.overlays.some(o => o.id === selectedOverlayId)) setSelectedOverlayId(null);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -77,6 +121,8 @@ const App: React.FC = () => {
       return;
     }
     setIsProcessing(true);
+    historyRef.current = []; // 새 파일이면 이전 기록은 버린다
+    setCanUndo(false);
     try {
       if (isPdf) {
         const converted = await convertPdfToImages(file);
@@ -109,27 +155,59 @@ const App: React.FC = () => {
     }
   };
 
+  const updateActiveOverlays = (fn: (overlays: TextOverlay[]) => TextOverlay[]) => (prev: SlideData[]) =>
+    prev.map((s, idx) => (idx === activeSlideIdx ? { ...s, overlays: fn(s.overlays) } : s));
+
   const handleApplyOverlay = (overlay: TextOverlay) => {
-    setSlides(prev => prev.map((s, idx) => idx === activeSlideIdx ? { ...s, overlays: [...s.overlays, overlay] } : s));
+    commitSlides(updateActiveOverlays(ovs => [...ovs, overlay]), 'apply');
     setSelection(null);
     setSelectedOverlayId(overlay.id);
   };
 
   const handleUpdateOverlays = (overlays: TextOverlay[]) => {
-    setSlides(prev => prev.map((s, idx) => idx === activeSlideIdx ? { ...s, overlays } : s));
+    commitSlides(updateActiveOverlays(() => overlays), `update:${activeSlideIdx}`, true);
   };
 
-  const handleUndo = () => {
-    setSlides(prev => prev.map((s, idx) => {
-      if (idx === activeSlideIdx && s.overlays.length > 0) {
-        const newOverlays = [...s.overlays];
-        newOverlays.pop();
-        return { ...s, overlays: newOverlays };
-      }
-      return s;
-    }));
+  const handleDeleteOverlay = (id: string) => {
+    commitSlides(updateActiveOverlays(ovs => ovs.filter(o => o.id !== id)), 'delete');
     setSelectedOverlayId(null);
   };
+
+  const handleClearOverlays = () => {
+    if (!slides[activeSlideIdx]?.overlays.length) return;
+    commitSlides(updateActiveOverlays(() => []), 'clear');
+    setSelectedOverlayId(null);
+  };
+
+  // 단축키: Delete = 선택한 텍스트 상자 삭제, Ctrl+Z = 실행 취소 (글자 입력 중에는 입력란 기본 동작에 맡긴다)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return;
+      // e.code 로 판단해야 한글 입력 상태(ㅋ)에서도 동작한다
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        handleUndo();
+      } else if (e.key === 'Delete' && selectedOverlayId) {
+        e.preventDefault();
+        handleDeleteOverlay(selectedOverlayId);
+      } else if (selectedOverlayId && ARROW_DELTA[e.code]) {
+        // 방향키 = 선택한 텍스트 상자 1px 이동 (Shift 는 10px). 누르고 있는 동안은 실행 취소 한 번으로 묶인다
+        e.preventDefault();
+        const step = e.shiftKey ? NUDGE_STEP_FAST : NUDGE_STEP;
+        const [dx, dy] = ARROW_DELTA[e.code];
+        commitSlides(
+          updateActiveOverlays(ovs => ovs.map(o => o.id === selectedOverlayId
+            ? { ...o, rect: { ...o.rect, x: o.rect.x + dx * step, y: o.rect.y + dy * step } }
+            : o)),
+          `nudge:${selectedOverlayId}`,
+          true,
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedOverlayId, activeSlideIdx]);
 
   const handleDownloadImages = async () => {
     await Promise.all(slides.flatMap(s => s.overlays.map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))));
@@ -147,35 +225,7 @@ const App: React.FC = () => {
           ctx.fillStyle = ov.backgroundColor;
           ctx.fillRect(ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
           
-          ctx.fillStyle = ov.fontColor;
-          ctx.font = canvasFont(ov.fontWeight, ov.fontSize, ov.fontFamily);
-          
-          if (ctx.letterSpacing !== undefined) {
-            ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
-          }
-
-          const lines = ov.newText.split('\n');
-          const lineHeight = ov.fontSize * 1.2;
-          const totalTextHeight = lines.length * lineHeight;
-
-          ctx.textAlign = (ov.hAlign || 'left') as CanvasTextAlign;
-          ctx.textBaseline = 'top';
-
-          let tx = ov.rect.x;
-          if (ov.hAlign === 'center') tx = ov.rect.x + ov.rect.width / 2;
-          else if (ov.hAlign === 'right') tx = ov.rect.x + ov.rect.width;
-
-          let ty = ov.rect.y;
-          if (ov.vAlign === 'middle') ty = ov.rect.y + (ov.rect.height - totalTextHeight) / 2;
-          else if (ov.vAlign === 'bottom') ty = ov.rect.y + ov.rect.height - totalTextHeight;
-
-          lines.forEach((line, index) => {
-            ctx.fillText(line, tx, ty + index * lineHeight);
-          });
-          
-          if (ctx.letterSpacing !== undefined) {
-            ctx.letterSpacing = '0px';
-          }
+          drawOverlayText(ctx, ov);
         });
 
         setTimeout(() => {
@@ -219,8 +269,8 @@ const App: React.FC = () => {
       </header>
       <main className="flex flex-1 overflow-hidden">
         <aside className="w-20 border-r border-slate-800 bg-[#1e293b] flex flex-col items-center py-6 gap-6 shrink-0">
-          <button onClick={handleUndo} className="p-3 rounded-xl hover:bg-slate-700 text-slate-400" title="실행 취소"><History size={24} /></button>
-          <button onClick={() => { setSlides(prev => prev.map((s, idx) => idx === activeSlideIdx ? {...s, overlays: []} : s)); setSelectedOverlayId(null); }} className="p-3 rounded-xl hover:bg-red-900/20 hover:text-red-400 text-slate-400" title="전체 삭제"><Trash2 size={24} /></button>
+          <button onClick={handleUndo} disabled={!canUndo} className="p-3 rounded-xl hover:bg-slate-700 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent" title="실행 취소 (Ctrl+Z)"><History size={24} /></button>
+          <button onClick={handleClearOverlays} className="p-3 rounded-xl hover:bg-red-900/20 hover:text-red-400 text-slate-400" title="이 슬라이드의 텍스트 상자 전체 삭제"><Trash2 size={24} /></button>
         </aside>
         <div className="flex-1 flex flex-col bg-slate-950 relative">
           {isProcessing ? (
@@ -246,7 +296,7 @@ const App: React.FC = () => {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-8 text-center">
               <div className="w-40 h-40 mb-10 bg-slate-900 rounded-[2.5rem] flex items-center justify-center border-2 border-dashed border-slate-800"><ImageIcon size={64} className="opacity-10" /></div>
-              <h3 className="text-2xl font-black text-slate-200 mb-3 tracking-tight">AI 슬라이터 에디터</h3>
+              <h3 className="text-2xl font-black text-slate-200 mb-3 tracking-tight">AI 슬라이드 에디터</h3>
               <p className="text-slate-500 max-w-xs mx-auto text-sm leading-relaxed mb-10">PDF 또는 이미지를 업로드하거나 이 창에 끌어다 놓아 지능형 텍스트 교체를 시작하세요.</p>
               <label className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black cursor-pointer shadow-2xl">
                 파일 선택
@@ -259,8 +309,9 @@ const App: React.FC = () => {
           activeSlide={slides[activeSlideIdx]} 
           selection={selection} 
           selectedOverlayId={selectedOverlayId}
-          onApplyOverlay={handleApplyOverlay} 
+          onApplyOverlay={handleApplyOverlay}
           onUpdateOverlays={handleUpdateOverlays}
+          onDeleteOverlay={handleDeleteOverlay}
         />
       </main>
       {isDragging && (
