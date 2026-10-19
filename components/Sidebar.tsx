@@ -19,6 +19,7 @@ import {
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   MoveHorizontal,
+  Star,
   Trash2
 } from 'lucide-react';
 
@@ -38,6 +39,8 @@ const FONT_GROUPS: { label: string; category: FontDef['category'] }[] = [
   { label: '손글씨', category: 'hand' },
   { label: '고정폭', category: 'mono' },
 ];
+
+const FAVORITES_KEY = 'slideEditor.favoriteFonts';
 
 const WEIGHT_LABELS: Record<string, string> = {
   '100': 'Thin', '200': 'ExtraLight', '300': 'Light', '400': 'Regular', '500': 'Medium',
@@ -346,6 +349,26 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const [showGallery, setShowGallery] = useState(false);
+
+  // 즐겨찾기 글꼴 — 이 브라우저에만 저장되는 개인 설정 (저장소를 못 쓰는 환경이면 이번 세션 동안만 유지)
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+      return Array.isArray(saved) ? saved.filter((id: unknown) => typeof id === 'string' && getFontDef(id)) : [];
+    } catch { return []; }
+  });
+  const toggleFavorite = (id: string) => {
+    setFavorites(prev => {
+      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
+      try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(next)); } catch { /* 저장 못 해도 화면에는 반영 */ }
+      return next;
+    });
+  };
+  // 즐겨찾기를 맨 위 묶음으로 올리고, 나머지 묶음에서는 뺀다 (드롭다운·미리보기 공통)
+  const fontSections = [
+    ...(favorites.length ? [{ key: 'favorites', label: '★ 즐겨찾기', fonts: favorites.map(id => getFontDef(id)!).filter(Boolean) }] : []),
+    ...FONT_GROUPS.map(g => ({ key: g.category, label: g.label, fonts: FONT_CATALOG.filter(f => f.category === g.category && !favorites.includes(f.id)) })),
+  ].filter(s => s.fonts.length);
   const gallerySample = replacementText.split('\n').find(l => l.trim())?.trim() || '바쁠수록 필요한 기록이';
 
   const weightValue = parseWeight(fontWeight);
@@ -523,21 +546,31 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-2">
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">글꼴</label>
-              <select
-                value={fontFamily}
-                onChange={(e) => selectFamily(e.target.value)}
-                style={{ fontFamily: fontStack(fontFamily) }}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
-              >
-                {!getFontDef(fontFamily) && <option value={fontFamily}>{fontFamily}</option>}
-                {FONT_GROUPS.map(g => (
-                  <optgroup key={g.category} label={g.label}>
-                    {FONT_CATALOG.filter(f => f.category === g.category).map(f => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={fontFamily}
+                  onChange={(e) => selectFamily(e.target.value)}
+                  style={{ fontFamily: fontStack(fontFamily) }}
+                  className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  {!getFontDef(fontFamily) && <option value={fontFamily}>{fontFamily}</option>}
+                  {fontSections.map(s => (
+                    <optgroup key={s.key} label={s.label}>
+                      {s.fonts.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                {getFontDef(fontFamily) && (
+                  <button
+                    onClick={() => toggleFavorite(fontFamily)}
+                    title={favorites.includes(fontFamily) ? '즐겨찾기 해제' : '즐겨찾기에 추가 (목록 맨 위에 고정)'}
+                    aria-label="글꼴 즐겨찾기"
+                    className={`shrink-0 w-10 rounded-lg border flex items-center justify-center transition-colors ${favorites.includes(fontFamily) ? 'border-amber-400/60 bg-amber-400/10 text-amber-300' : 'border-slate-700 bg-slate-900 text-slate-500 hover:text-amber-300'}`}
+                  >
+                    <Star size={16} fill={favorites.includes(fontFamily) ? 'currentColor' : 'none'} />
+                  </button>
+                )}
+              </div>
               <button
                 onClick={() => setShowGallery(v => !v)}
                 className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
@@ -548,24 +581,33 @@ const Sidebar: React.FC<SidebarProps> = ({
               {showGallery && (
                 // 원본과 눈으로 비교해 고를 수 있게 현재 글자·두께로 모든 글꼴을 그려 보여준다
                 <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 divide-y divide-slate-800">
-                  {FONT_GROUPS.map(g => (
-                    <div key={g.category}>
-                      <div className="sticky top-0 z-10 px-3 py-1 text-[10px] font-bold text-slate-500 bg-slate-900/95 backdrop-blur-sm">{g.label}</div>
-                      {FONT_CATALOG.filter(f => f.category === g.category && (f.hangul || !/[가-힣]/.test(gallerySample))).map(f => (
-                        <button
-                          key={f.id}
-                          onClick={() => selectFamily(f.id)}
-                          className={`w-full text-left px-3 py-2 transition-colors ${f.id === fontFamily ? 'bg-blue-500/15' : 'hover:bg-slate-800'}`}
-                        >
-                          <div className={`text-[10px] mb-0.5 ${f.id === fontFamily ? 'text-blue-300' : 'text-slate-500'}`}>{f.name}</div>
-                          <div
-                            className="text-lg leading-snug truncate"
-                            style={{ fontFamily: fontStack(f.id), fontWeight: resolveWeight(f.id, fontWeight).cssWeight, color: fontColor, background: isTransparent ? undefined : backgroundColor }}
-                          >
-                            {gallerySample}
+                  {fontSections.map(s => (
+                    <div key={s.key}>
+                      <div className={`sticky top-0 z-10 px-3 py-1 text-[10px] font-bold bg-slate-900/95 backdrop-blur-sm ${s.key === 'favorites' ? 'text-amber-300' : 'text-slate-500'}`}>{s.label}</div>
+                      {s.fonts.filter(f => f.hangul || !/[가-힣]/.test(gallerySample)).map(f => {
+                        const fav = favorites.includes(f.id);
+                        return (
+                          <div key={f.id} className={`flex items-stretch transition-colors ${f.id === fontFamily ? 'bg-blue-500/15' : 'hover:bg-slate-800'}`}>
+                            <button onClick={() => selectFamily(f.id)} className="flex-1 min-w-0 text-left pl-3 py-2">
+                              <div className={`text-[10px] mb-0.5 ${f.id === fontFamily ? 'text-blue-300' : 'text-slate-500'}`}>{f.name}</div>
+                              <div
+                                className="text-lg leading-snug truncate"
+                                style={{ fontFamily: fontStack(f.id), fontWeight: resolveWeight(f.id, fontWeight).cssWeight, color: fontColor, background: isTransparent ? undefined : backgroundColor }}
+                              >
+                                {gallerySample}
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => toggleFavorite(f.id)}
+                              title={fav ? '즐겨찾기 해제' : '즐겨찾기에 추가'}
+                              aria-label={`${f.name} 즐겨찾기`}
+                              className={`shrink-0 px-3 transition-colors ${fav ? 'text-amber-300' : 'text-slate-600 hover:text-amber-300'}`}
+                            >
+                              <Star size={15} fill={fav ? 'currentColor' : 'none'} />
+                            </button>
                           </div>
-                        </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
