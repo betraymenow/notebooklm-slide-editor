@@ -10,7 +10,12 @@ export interface FontDef {
   hint: string;        // AI에게 주는 생김새 설명
   css?: string;        // Google Fonts 가 아닌 경우 @font-face CSS 주소
   variable?: [number, number]; // 가변 글꼴이면 연속으로 지원하는 두께 범위
+  faces?: { weight: number | string; url: string }[]; // CSS 없이 글꼴 파일만 있는 경우 직접 @font-face 를 만든다
 }
+
+// 눈누(noonnu) 무료 한글 글꼴 — jsDelivr 로 배포되는 파일 (패키지·파일 이름은 jsDelivr 파일 목록으로 확인함)
+const NOONNU = 'https://cdn.jsdelivr.net/gh/projectnoonnu/';
+const nf = (pkg: string, file: string) => `${NOONNU}${pkg}/${file}`;
 
 export const FONT_CATALOG: FontDef[] = [
   { id: 'Pretendard Variable', name: '프리텐다드', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], variable: [100, 900], hangul: true, hint: 'modern neutral geometric-grotesque sans, very common in Korean UI and slides', css: 'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css' },
@@ -18,6 +23,28 @@ export const FONT_CATALOG: FontDef[] = [
   { id: 'SUIT Variable', name: 'SUIT', category: 'sans', weights: [300, 400, 500, 600, 700, 800, 900], variable: [100, 900], hangul: true, hint: 'clean modern sans with slightly narrow hangul', css: 'https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css' },
   { id: 'Spoqa Han Sans Neo', name: '스포카 한 산스 Neo', category: 'sans', weights: [300, 400, 500, 700], hangul: true, hint: 'compact modern gothic with tight, even hangul', css: 'https://spoqa.github.io/spoqa-han-sans/css/SpoqaHanSansNeo.css' },
   { id: 'Wanted Sans Variable', name: '원티드 산스', category: 'sans', weights: [400, 500, 600, 700, 800, 900, 1000], variable: [400, 1000], hangul: true, hint: 'contemporary grotesque sans with crisp hangul', css: 'https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css' },
+  { id: 'GmarketSans', name: 'G마켓 산스', category: 'sans', weights: [300, 500, 700], hangul: true, hint: 'geometric gothic with circular ㅇ and rounded corners, very popular for Korean slide and banner titles',
+    faces: [300, 500, 700].map((w, i) => ({ weight: w, url: nf('noonfonts_2001@1.1', ['GmarketSansLight', 'GmarketSansMedium', 'GmarketSansBold'][i] + '.woff') })) },
+  { id: 'Paperlogy', name: '페이퍼로지', category: 'sans', weights: [100, 200, 300, 400, 500, 600, 700, 800, 900], hangul: true, hint: 'modern geometric gothic made for presentations, even stroke widths',
+    faces: ['1Thin', '2ExtraLight', '3Light', '4Regular', '5Medium', '6SemiBold', '7Bold', '8ExtraBold', '9Black'].map((n, i) => ({ weight: (i + 1) * 100, url: nf('2408-3@1.0', `Paperlogy-${n}.woff2`) })) },
+  { id: 'S-Core Dream', name: '에스코어 드림', category: 'sans', weights: [100, 200, 300, 400, 500, 600, 700, 800, 900], hangul: true, hint: 'clean geometric gothic widely used in corporate presentations',
+    faces: ['1Thin', '2ExtraLight', '3Light', '4Regular', '5Medium', '6Bold', '7ExtraBold', '8Heavy', '9Black'].map((n, i) => ({ weight: (i + 1) * 100, url: nf('noonfonts_six@1.2', `S-CoreDream-${n}.woff`) })) },
+  // 가변 woff2 는 브라우저가 거부해서 네이버 공식 두께별 파일을 쓴다
+  { id: 'NanumSquare Neo', name: '나눔스퀘어 네오', category: 'sans', weights: [300, 400, 700, 800, 900], hangul: true, hint: 'updated squarish gothic with flat strokes, crisp and modern',
+    faces: [[300, 'aLt'], [400, 'bRg'], [700, 'cBd'], [800, 'dEb'], [900, 'eHv']].map(([w, n]) => ({ weight: w, url: `https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareNeo/NanumSquareNeoTTF-${n}.woff` })) },
+  { id: 'NanumSquareRound', name: '나눔스퀘어라운드', category: 'sans', weights: [300, 400, 700, 800], hangul: true, hint: 'squarish gothic with rounded stroke ends, soft friendly look', css: 'https://cdn.jsdelivr.net/gh/innks/NanumSquareRound@master/nanumsquareround.min.css' },
+  { id: 'LINE Seed KR', name: 'LINE Seed', category: 'sans', weights: [100, 400, 700], hangul: true, hint: 'friendly geometric gothic with round ㅇ and open shapes',
+    faces: [[100, 'Th'], [400, 'Rg'], [700, 'Bd']].map(([w, n]) => ({ weight: w, url: nf('noonfonts_11-01@1.0', `LINESeedKR-${n}.woff2`) })) },
+  { id: 'Min Sans', name: '민산스', category: 'sans', weights: [100, 300, 400, 500, 700, 900], hangul: true, hint: 'neutral contemporary gothic, compact and even',
+    faces: [[100, 'Thin'], [300, 'Light'], [400, 'Regular'], [500, 'Medium'], [700, 'Bold'], [900, 'Black']].map(([w, n]) => ({ weight: w, url: nf('noonfonts_2201-2@1.0', `MinSans-${n}.woff`) })) },
+  { id: 'OAGothic', name: 'OA고딕', category: 'sans', weights: [500, 800], hangul: true, hint: 'compact sturdy gothic for headlines',
+    faces: [[500, 'Medium'], [800, 'ExtraBold']].map(([w, n]) => ({ weight: w, url: nf('noonfonts_2302@1.0', `OAGothic-${n}.woff2`) })) },
+  { id: 'KoddiUDOnGothic', name: '코디 온고딕', category: 'sans', weights: [400, 700], hangul: true, hint: 'highly legible universal-design gothic with open counters',
+    faces: [[400, 'Regular'], [700, 'Bold']].map(([w, n]) => ({ weight: w, url: nf('noonfonts_2105_2@1.0', `KoddiUDOnGothic-${n}.woff`) })) },
+  { id: 'BookkGothic', name: '부크크 고딕', category: 'sans', weights: [300, 700], hangul: true, hint: 'book-style gothic with slightly humanist strokes',
+    faces: [[300, 'Lt'], [700, 'Bd']].map(([w, n]) => ({ weight: w, url: nf('noonfonts_2302@1.0', `BookkGothic-${n}.woff2`) })) },
+  { id: 'ONE Mobile', name: '원스토어 모바일', category: 'sans', weights: [400], hangul: true, hint: 'rounded mobile UI gothic',
+    faces: [{ weight: 400, url: nf('noonfonts_2105_2@1.0', 'ONE-Mobile-Regular.woff') }] },
   { id: 'Noto Sans KR', name: '본고딕 (Noto Sans KR)', category: 'sans', weights: [300, 400, 500, 700, 900], variable: [100, 900], hangul: true, hint: 'standard clean gothic sans (Source Han Sans), used by Google products and NotebookLM' },
   { id: 'Nanum Gothic', name: '나눔고딕', category: 'sans', weights: [400, 700, 800], hangul: true, hint: 'classic rounded-ish gothic sans, slightly wider, older look' },
   { id: 'Gothic A1', name: 'Gothic A1', category: 'sans', weights: [300, 400, 500, 700, 900], hangul: true, hint: 'neutral gothic sans with compact proportions' },
@@ -29,6 +56,16 @@ export const FONT_CATALOG: FontDef[] = [
   { id: 'Gowun Batang', name: '고운바탕', category: 'serif', weights: [400, 700], hangul: true, hint: 'soft calligraphic batang serif' },
   { id: 'Hahmlet', name: '함렛', category: 'serif', weights: [400, 700], variable: [100, 900], hangul: true, hint: 'contemporary serif with sharp wedges' },
   { id: 'Song Myung', name: '송명', category: 'serif', weights: [400], hangul: true, hint: 'traditional heavy-ended myeongjo, old print style' },
+  { id: 'ONE Mobile Title', name: '원스토어 모바일 제목', category: 'display', weights: [700], hangul: true, hint: 'bold rounded title gothic',
+    faces: [{ weight: 700, url: nf('noonfonts_2105_2@1.0', 'ONE-Mobile-Title.woff') }] },
+  { id: 'Cafe24 Ssurround', name: '카페24 써라운드', category: 'display', weights: [300, 700], hangul: true, hint: 'very rounded, bubbly bold gothic',
+    faces: [{ weight: 300, url: nf('noonfonts_2105_2@1.0', 'Cafe24SsurroundAir.woff') }, { weight: 700, url: nf('noonfonts_2105_2@1.0', 'Cafe24Ssurround.woff') }] },
+  { id: 'BM Hanna Pro', name: '배민 한나 Pro', category: 'display', weights: [300, 400], hangul: true, hint: 'bold hand-cut gothic with slightly irregular strokes (Baemin Hanna)',
+    faces: [{ weight: 300, url: nf('noonfonts_four@1.2', 'BMHANNAAir.woff') }, { weight: 400, url: nf('noonfonts_seven@1.0', 'BMHANNAPro.woff') }] },
+  { id: 'Jalnan', name: '잘난체', category: 'display', weights: [700], hangul: true, hint: 'heavy rounded display gothic, very bold and wide',
+    faces: [{ weight: 700, url: nf('noonfonts_four@1.2', 'JalnanOTF00.woff') }] },
+  { id: 'PilseungGothic', name: '필승고딕', category: 'display', weights: [800], hangul: true, hint: 'heavy condensed headline gothic',
+    faces: [{ weight: 800, url: nf('noonfonts_2302@1.0', 'PilseungGothic.woff2') }] },
   { id: 'Black Han Sans', name: '검은고딕', category: 'display', weights: [400], hangul: true, hint: 'extremely heavy, blocky headline gothic' },
   { id: 'Do Hyeon', name: '도현체', category: 'display', weights: [400], hangul: true, hint: 'bold, squared, condensed headline font (Baemin style)' },
   { id: 'Jua', name: '주아체', category: 'display', weights: [400], hangul: true, hint: 'bold rounded cute headline font (Baemin style)' },
@@ -250,7 +287,7 @@ const drawTextCrisp = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
 
 const googleFontsUrl = () => {
   const families = FONT_CATALOG
-    .filter(f => !f.css)
+    .filter(f => !f.css && !f.faces)
     .map(f => {
       const fam = f.id.replace(/ /g, '+');
       if (f.variable) return `family=${fam}:wght@${f.variable[0]}..${f.variable[1]}`;
@@ -273,6 +310,15 @@ export const ensureFontCss = () => {
     document.head.appendChild(link);
   });
   const urls = [googleFontsUrl(), ...FONT_CATALOG.flatMap(f => (f.css ? [f.css] : []))];
+
+  // 파일만 있는 글꼴은 @font-face 를 직접 만든다 (파일은 실제로 쓰일 때 내려받는다)
+  const style = document.createElement('style');
+  style.textContent = FONT_CATALOG.flatMap(f => (f.faces || []).map(face => {
+    const format = face.url.endsWith('.woff2') ? 'woff2' : 'woff';
+    return `@font-face{font-family:"${f.id}";font-weight:${face.weight};font-style:normal;font-display:swap;src:url("${face.url}") format("${format}");}`;
+  })).join('\n');
+  document.head.appendChild(style);
+
   cssReady = Promise.all(urls.map(addLink)).then(() => undefined);
   return cssReady;
 };
@@ -620,6 +666,7 @@ export const matchFont = async (
   fgHex: string,
   bgHex: string,
   aiHints: string[] = [],
+  weightHint = 700, // AI가 본 두께 — 파일이 큰 글꼴은 이 근처 한 두께만 비교한다
 ): Promise<FontMatch[]> => {
   const cleanText = text.trim();
   if (!cleanText) return [];
@@ -655,7 +702,13 @@ export const matchFont = async (
 
   const korean = hasHangul(cleanText);
   const candidates = FONT_CATALOG.filter(f => f.hangul || !korean);
-  await Promise.all(candidates.flatMap(f => f.weights.map(w => loadFont(f.id, w, cleanText))));
+  // Google Fonts·가변 서브셋은 필요한 글자만 받지만, 파일 통째로 받는 글꼴은 두께 하나에 수백 KB 라 한 두께만 비교
+  const testWeights = (f: FontDef) => {
+    const heavy = !!f.faces || (!!f.css && !f.variable);
+    if (!heavy) return f.weights;
+    return [f.weights.reduce((a, b) => (Math.abs(b - weightHint) < Math.abs(a - weightHint) ? b : a))];
+  };
+  await Promise.all(candidates.flatMap(f => testWeights(f).map(w => loadFont(f.id, w, cleanText))));
 
   const scoreAll = (family: string, weight: number, blurPx: number) => {
     let score = 0, sizeSum = 0, spacingSum = 0;
@@ -672,7 +725,7 @@ export const matchFont = async (
   const runPass = (blurPx: number) => {
     const out: FontMatch[] = [];
     for (const f of candidates) {
-      for (const w of f.weights) {
+      for (const w of testWeights(f)) {
         const s = scoreAll(f.id, w, blurPx);
         if (!s) continue;
         const score = s.score + (aiHints.includes(f.id) ? 0.03 : 0);

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
-import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, MIN_WEIGHT, MAX_WEIGHT, PIXEL_SCALE_MIN } from '../services/fontService';
+import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT, PIXEL_SCALE_MIN } from '../services/fontService';
 import { 
   Loader2, 
   Type as TypeIcon, 
@@ -279,7 +279,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       // 3. 글씨체 매칭: 픽셀 비교로 후보를 추리고, AI가 견본과 원본을 눈으로 비교해 순서를 정한다
       setIsMatching(true);
-      const matches = await matchFont(cropPixels, result.text, textColor, detectedBg, result.fontCandidates);
+      const matches = await matchFont(cropPixels, result.text, textColor, detectedBg, result.fontCandidates, parseWeight(result.fontWeight));
       // 후보 = 픽셀 비교 상위 4개 + AI가 처음에 짚은 폰트(AI가 본 두께에 가장 가까운 두께로)
       const nearestWeight = (id: string) => {
         const target = parseInt(result.fontWeight) || 400;
@@ -337,6 +337,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       updateSelectedOverlay({ fontFamily: m.fontFamily, fontWeight: m.fontWeight, fontSize: m.fontSize, letterSpacing: m.letterSpacing });
     }
   };
+
+  // 두께는 슬라이더 값을 그대로 유지 (고정 두께 글꼴은 그리는 쪽에서 보정)
+  const selectFamily = (family: string) => {
+    setFontFamily(family);
+    loadFont(family, fontWeight, replacementText);
+    if (isEditing) updateSelectedOverlay({ fontFamily: family });
+  };
+
+  const [showGallery, setShowGallery] = useState(false);
+  const gallerySample = replacementText.split('\n').find(l => l.trim())?.trim() || '바쁠수록 필요한 기록이';
 
   const weightValue = parseWeight(fontWeight);
   const fontDef = getFontDef(fontFamily);
@@ -513,15 +523,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-2">
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">글꼴</label>
-              <select 
+              <select
                 value={fontFamily}
-                onChange={(e) => {
-                  // 두께는 슬라이더 값을 그대로 유지 (고정 두께 글꼴은 그리는 쪽에서 보정)
-                  const family = e.target.value;
-                  setFontFamily(family);
-                  loadFont(family, fontWeight, replacementText);
-                  if (isEditing) updateSelectedOverlay({ fontFamily: family });
-                }}
+                onChange={(e) => selectFamily(e.target.value)}
                 style={{ fontFamily: fontStack(fontFamily) }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
               >
@@ -534,6 +538,38 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </optgroup>
                 ))}
               </select>
+              <button
+                onClick={() => setShowGallery(v => !v)}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                <span>내 글자로 모든 글꼴 미리보기</span>
+                <span>{showGallery ? '접기 ▲' : '펼치기 ▼'}</span>
+              </button>
+              {showGallery && (
+                // 원본과 눈으로 비교해 고를 수 있게 현재 글자·두께로 모든 글꼴을 그려 보여준다
+                <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 divide-y divide-slate-800">
+                  {FONT_GROUPS.map(g => (
+                    <div key={g.category}>
+                      <div className="sticky top-0 z-10 px-3 py-1 text-[10px] font-bold text-slate-500 bg-slate-900/95 backdrop-blur-sm">{g.label}</div>
+                      {FONT_CATALOG.filter(f => f.category === g.category && (f.hangul || !/[가-힣]/.test(gallerySample))).map(f => (
+                        <button
+                          key={f.id}
+                          onClick={() => selectFamily(f.id)}
+                          className={`w-full text-left px-3 py-2 transition-colors ${f.id === fontFamily ? 'bg-blue-500/15' : 'hover:bg-slate-800'}`}
+                        >
+                          <div className={`text-[10px] mb-0.5 ${f.id === fontFamily ? 'text-blue-300' : 'text-slate-500'}`}>{f.name}</div>
+                          <div
+                            className="text-lg leading-snug truncate"
+                            style={{ fontFamily: fontStack(f.id), fontWeight: resolveWeight(f.id, fontWeight).cssWeight, color: fontColor, background: isTransparent ? undefined : backgroundColor }}
+                          >
+                            {gallerySample}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
