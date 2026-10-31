@@ -1,30 +1,30 @@
 @echo off
-title NotebookLM ½½¶óÀÌµå ÆíÁý±â
+title NotebookLM ìŠ¬ë¼ì´ë“œ íŽ¸ì§‘ê¸°
 cd /d "%~dp0"
 
 where npm >nul 2>nul
 if errorlevel 1 (
-  echo [¿À·ù] Node.js°¡ ¼³Ä¡µÇ¾î ÀÖÁö ¾Ê½À´Ï´Ù. https://nodejs.org ¿¡¼­ ¼³Ä¡ÇÑ µÚ ´Ù½Ã ½ÇÇàÇÏ¼¼¿ä.
+  echo [ì˜¤ë¥˜] Node.jsê°€ ì„¤ì¹˜ë˜ì–´ ìžˆì§€ ì•ŠìŠµë‹ˆë‹¤. https://nodejs.org ì—ì„œ ì„¤ì¹˜í•œ ë’¤ ë‹¤ì‹œ ì‹¤í–‰í•˜ì„¸ìš”.
   pause
   exit /b 1
 )
 
 if not exist ".env.local" (
-  echo [¾È³»] .env.local ÆÄÀÏÀÌ ¾ø¾î AI ºÐ¼® ±â´ÉÀÌ µ¿ÀÛÇÏÁö ¾Ê½À´Ï´Ù. README¸¦ Âü°íÇØ GEMINI_API_KEY¸¦ ³Ö¾î ÁÖ¼¼¿ä.
+  echo [ì•ˆë‚´] .env.local íŒŒì¼ì´ ì—†ì–´ AI ë¶„ì„ ê¸°ëŠ¥ì´ ë™ìž‘í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤. READMEë¥¼ ì°¸ê³ í•´ GEMINI_API_KEYë¥¼ ë„£ì–´ ì£¼ì„¸ìš”.
 )
 
 if not exist "node_modules" (
-  echo Ã³À½ ½ÇÇàÀÌ¶ó ÇÊ¿äÇÑ ÆÐÅ°Áö¸¦ ¼³Ä¡ÇÕ´Ï´Ù...
+  echo ì²˜ìŒ ì‹¤í–‰ì´ë¼ í•„ìš”í•œ íŒ¨í‚¤ì§€ë¥¼ ì„¤ì¹˜í•©ë‹ˆë‹¤...
   call npm install
   if errorlevel 1 (
-    echo [¿À·ù] ÆÐÅ°Áö ¼³Ä¡¿¡ ½ÇÆÐÇß½À´Ï´Ù.
+    echo [ì˜¤ë¥˜] íŒ¨í‚¤ì§€ ì„¤ì¹˜ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤.
     pause
     exit /b 1
   )
 )
 
-echo ÆíÁý±â¸¦ ½ÃÀÛÇÕ´Ï´Ù. ºê¶ó¿ìÀú°¡ ÀÚµ¿À¸·Î ¿­¸³´Ï´Ù.
-echo ÀÌ Ã¢À» ´ÝÀ¸¸é ÆíÁý±âµµ Á¾·áµË´Ï´Ù.
+echo íŽ¸ì§‘ê¸°ë¥¼ ì‹œìž‘í•©ë‹ˆë‹¤. ë¸Œë¼ìš°ì €ê°€ ìžë™ìœ¼ë¡œ ì—´ë¦½ë‹ˆë‹¤.
+echo ì´ ì°½ì„ ë‹«ìœ¼ë©´ íŽ¸ì§‘ê¸°ë„ ì¢…ë£Œë©ë‹ˆë‹¤.
 echo.
 set BROWSER=chrome
 call npm run dev -- --open
