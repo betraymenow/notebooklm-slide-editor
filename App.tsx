@@ -21,6 +21,8 @@ const ARROW_DELTA: Record<string, [number, number]> = {
   ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
 };
 
+const PASTE_OFFSET = 20; // 붙여넣은 텍스트 상자가 원본에서 비켜나는 거리 (이미지 픽셀)
+
 const App: React.FC = () => {
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
@@ -179,15 +181,58 @@ const App: React.FC = () => {
     setSelectedOverlayId(null);
   };
 
-  // 단축키: Delete = 선택한 텍스트 상자 삭제, Ctrl+Z = 실행 취소 (글자 입력 중에는 입력란 기본 동작에 맡긴다)
+  // ---------- 텍스트 상자 복사·붙여넣기 ----------
+  // 앱 안에서만 쓰는 클립보드: 글자 설정과 상자 크기만 가져가고, 붙여넣으면 글자는 빈칸이다
+  const copiedOverlayRef = useRef<TextOverlay | null>(null);
+  const pasteCountRef = useRef(0);
+  const [editRequestId, setEditRequestId] = useState<string | null>(null);
+
+  const handleCopyOverlay = (id: string) => {
+    const ov = slidesRef.current[activeSlideIdx]?.overlays.find(o => o.id === id);
+    if (!ov) return;
+    copiedOverlayRef.current = { ...ov, rect: { ...ov.rect } };
+    pasteCountRef.current = 0;
+  };
+
+  const handlePasteOverlay = () => {
+    const src = copiedOverlayRef.current;
+    const slide = slidesRef.current[activeSlideIdx];
+    if (!src || !slide) return;
+    // 같은 자리에 겹치지 않게 붙일 때마다 20px 씩 오른쪽 아래로 (슬라이드 밖으로는 안 나가게)
+    pasteCountRef.current += 1;
+    const off = PASTE_OFFSET * pasteCountRef.current;
+    const x = Math.min(src.rect.x + off, Math.max(0, slide.width - src.rect.width));
+    const y = Math.min(src.rect.y + off, Math.max(0, slide.height - src.rect.height));
+    const pasted: TextOverlay = {
+      ...src,
+      id: Math.random().toString(36).slice(2, 11),
+      rect: { ...src.rect, x, y },
+      newText: '',
+      originalText: '',
+    };
+    commitSlides(updateActiveOverlays(ovs => [...ovs, pasted]), 'paste');
+    setSelection(null);
+    setSelectedOverlayId(pasted.id);
+    setEditRequestId(pasted.id); // 붙이자마자 그 자리에서 글자를 입력하도록
+  };
+
+  // 단축키: Delete = 선택한 텍스트 상자 삭제, Ctrl+Z = 실행 취소, Ctrl+C/V = 상자 복사·붙여넣기
+  // (글자 입력 중에는 입력란 기본 동작에 맡긴다)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return;
-      // e.code 로 판단해야 한글 입력 상태(ㅋ)에서도 동작한다
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ') {
+      const mod = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+      // e.code 로 판단해야 한글 입력 상태(ㅋ, ㅊ, ㅍ)에서도 동작한다
+      if (mod && e.code === 'KeyZ') {
         e.preventDefault();
         handleUndo();
+      } else if (mod && e.code === 'KeyC' && selectedOverlayId) {
+        e.preventDefault();
+        handleCopyOverlay(selectedOverlayId);
+      } else if (mod && e.code === 'KeyV' && copiedOverlayRef.current) {
+        e.preventDefault();
+        handlePasteOverlay();
       } else if (e.key === 'Delete' && selectedOverlayId) {
         e.preventDefault();
         handleDeleteOverlay(selectedOverlayId);
@@ -285,7 +330,9 @@ const App: React.FC = () => {
                 selectedOverlayId={selectedOverlayId}
                 onSelectionChange={(rect) => { setSelection(rect); if (rect) setSelectedOverlayId(null); }} 
                 onOverlaySelect={setSelectedOverlayId}
-                onUpdateOverlays={handleUpdateOverlays} 
+                onUpdateOverlays={handleUpdateOverlays}
+                editRequestId={editRequestId}
+                onEditRequestHandled={() => setEditRequestId(null)}
               />
               <div className="h-12 bg-[#1e293b] border-t border-slate-800 flex items-center justify-center gap-8 shrink-0">
                 <button disabled={activeSlideIdx === 0} onClick={() => setActiveSlideIdx(prev => prev - 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20"><ChevronLeft /></button>

@@ -4,12 +4,29 @@ import { SlideData, Rect, Point, HandleType, TextOverlay } from '../types';
 import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM } from '../constants';
 import { drawOverlayText, loadFont, fontStack, resolveWeight } from '../services/fontService';
 
+// 사각형의 8개 손잡이 위치 (모서리 4 + 변 가운데 4)
+const handlePoints = (r: Rect): Point[] => [
+  { x: r.x, y: r.y },
+  { x: r.x + r.width / 2, y: r.y },
+  { x: r.x + r.width, y: r.y },
+  { x: r.x + r.width, y: r.y + r.height / 2 },
+  { x: r.x + r.width, y: r.y + r.height },
+  { x: r.x + r.width / 2, y: r.y + r.height },
+  { x: r.x, y: r.y + r.height },
+  { x: r.x, y: r.y + r.height / 2 },
+];
+
+const handleCursor = (h: HandleType) =>
+  h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize';
+
 interface EditorCanvasProps {
   slide: SlideData;
   selectedOverlayId: string | null;
   onSelectionChange: (rect: Rect | null) => void;
   onOverlaySelect: (id: string | null) => void;
   onUpdateOverlays: (overlays: TextOverlay[]) => void;
+  editRequestId?: string | null;        // 이 상자를 바로 글자 입력 상태로 연다 (붙여넣기 직후)
+  onEditRequestHandled?: () => void;
 }
 
 const EditorCanvas: React.FC<EditorCanvasProps> = ({ 
@@ -17,7 +34,9 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   selectedOverlayId,
   onSelectionChange, 
   onOverlaySelect,
-  onUpdateOverlays 
+  onUpdateOverlays,
+  editRequestId,
+  onEditRequestHandled
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -158,28 +177,24 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       if (overlay.id !== editingId) drawOverlayText(ctx, overlay); // 편집 중인 글자는 입력창이 대신 보여준다
     });
 
+    const drawHandles = (rect: Rect) => {
+      ctx.fillStyle = COLORS.handle;
+      handlePoints(rect).forEach(h => {
+        ctx.fillRect(h.x - (HANDLE_SIZE / 2) / zoom, h.y - (HANDLE_SIZE / 2) / zoom, HANDLE_SIZE / zoom, HANDLE_SIZE / zoom);
+      });
+    };
+
+    // 선택한 텍스트 상자: 글자 위에 크기 조절 손잡이를 그린다
+    const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
+    if (selectedOverlay) drawHandles(selectedOverlay.rect);
+
     if (selection) {
       ctx.strokeStyle = COLORS.primary;
       ctx.lineWidth = 2 / zoom;
       ctx.strokeRect(selection.x, selection.y, selection.width, selection.height);
       ctx.fillStyle = COLORS.overlay;
       ctx.fillRect(selection.x, selection.y, selection.width, selection.height);
-
-      const handles: Point[] = [
-        { x: selection.x, y: selection.y },
-        { x: selection.x + selection.width / 2, y: selection.y },
-        { x: selection.x + selection.width, y: selection.y },
-        { x: selection.x + selection.width, y: selection.y + selection.height / 2 },
-        { x: selection.x + selection.width, y: selection.y + selection.height },
-        { x: selection.x + selection.width / 2, y: selection.y + selection.height },
-        { x: selection.x, y: selection.y + selection.height },
-        { x: selection.x, y: selection.y + selection.height / 2 },
-      ];
-
-      ctx.fillStyle = COLORS.handle;
-      handles.forEach(h => {
-        ctx.fillRect(h.x - (HANDLE_SIZE / 2) / zoom, h.y - (HANDLE_SIZE / 2) / zoom, HANDLE_SIZE / zoom, HANDLE_SIZE / zoom);
-      });
+      drawHandles(selection);
     }
 
     ctx.restore();
@@ -206,6 +221,16 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     onOverlaySelect(overlay.id);
     setEditingId(overlay.id);
   };
+
+  // 붙여넣기 직후처럼 밖에서 "이 상자 바로 편집" 요청이 오면 입력창을 연다
+  useEffect(() => {
+    if (!editRequestId) return;
+    const target = slide.overlays.find(o => o.id === editRequestId);
+    if (target) {
+      startEditing(target);
+      onEditRequestHandled?.();
+    }
+  }, [editRequestId, slide.overlays]);
 
   const updateEditingText = (text: string) => {
     onUpdateOverlays(slide.overlays.map(o => (o.id === editingId ? { ...o, newText: text } : o)));
@@ -298,6 +323,22 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   // 드래그 없이 클릭만 했는지 판단용 (빈 곳 클릭 = 텍스트 선택 해제)
   const panDistanceRef = useRef(0);
 
+  // 텍스트 상자 크기 조절 중: 누른 순간의 상자·위치를 기준으로 계산해야 끌수록 어긋나지 않는다
+  const overlayResizeRef = useRef<{ handle: HandleType; start: Point; rect: Rect } | null>(null);
+  const [isResizingOverlay, setIsResizingOverlay] = useState(false);
+
+  const resizedRect = (r: Rect, handle: HandleType, dx: number, dy: number): Rect => {
+    let { x, y, width, height } = r;
+    if (handle.includes('e')) width = r.width + dx;
+    if (handle.includes('w')) { x = r.x + dx; width = r.width - dx; }
+    if (handle.includes('s')) height = r.height + dy;
+    if (handle.includes('n')) { y = r.y + dy; height = r.height - dy; }
+    // 최소 크기 아래로는 줄지 않게, 반대쪽 변은 제자리에 둔다
+    if (width < MIN_RECT_SIZE) { if (handle.includes('w')) x = r.x + r.width - MIN_RECT_SIZE; width = MIN_RECT_SIZE; }
+    if (height < MIN_RECT_SIZE) { if (handle.includes('n')) y = r.y + r.height - MIN_RECT_SIZE; height = MIN_RECT_SIZE; }
+    return { x, y, width, height };
+  };
+
   const startPan = (e: React.MouseEvent) => {
     setIsPanning(true);
     setStartPoint(getScreenCoords(e));
@@ -321,6 +362,17 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     if (isSpacePressed || e.button === 1) {
       startPan(e);
       return;
+    }
+
+    // 선택한 텍스트 상자의 손잡이를 잡으면 크기 조절
+    const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
+    if (selectedOverlay) {
+      const handle = getHandleAt(p, selectedOverlay.rect);
+      if (handle) {
+        overlayResizeRef.current = { handle, start: p, rect: { ...selectedOverlay.rect } };
+        setIsResizingOverlay(true);
+        return;
+      }
     }
 
     if (selection) {
@@ -351,13 +403,24 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     const canvasP = getCanvasCoords(e);
 
     if (canvasRef.current) {
+      const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
+      const overlayHandle = selectedOverlay && !isSpacePressed ? getHandleAt(canvasP, selectedOverlay.rect) : null;
       let cursor = 'grab';
       if (isPanning || isDraggingOverlay) cursor = 'grabbing';
+      else if (isResizingOverlay && overlayResizeRef.current) cursor = handleCursor(overlayResizeRef.current.handle);
       else if (isDrawing || ((e.ctrlKey || e.metaKey) && !isSpacePressed)) cursor = 'crosshair';
-      else if (isResizingSelection) cursor = 'nwse-resize';
-      else if (selection && getHandleAt(canvasP, selection)) cursor = 'nwse-resize';
+      else if (isResizingSelection && dragType && dragType !== 'move') cursor = handleCursor(dragType);
+      else if (overlayHandle) cursor = handleCursor(overlayHandle);
+      else if (selection && getHandleAt(canvasP, selection)) cursor = handleCursor(getHandleAt(canvasP, selection)!);
       else if (!isSpacePressed && slide.overlays.some(o => isPointInRect(canvasP, o.rect))) cursor = 'pointer';
       canvasRef.current.style.cursor = cursor;
+    }
+
+    const resize = overlayResizeRef.current;
+    if (isResizingOverlay && resize && selectedOverlayId) {
+      const rect = resizedRect(resize.rect, resize.handle, canvasP.x - resize.start.x, canvasP.y - resize.start.y);
+      onUpdateOverlays(slide.overlays.map(ov => (ov.id === selectedOverlayId ? { ...ov, rect } : ov)));
+      return;
     }
 
     if (isPanning && startPoint) {
@@ -407,6 +470,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     setIsDrawing(false);
     setIsDraggingOverlay(false);
     setIsResizingSelection(false);
+    setIsResizingOverlay(false);
+    overlayResizeRef.current = null;
     setIsPanning(false);
     setStartPoint(null);
   };

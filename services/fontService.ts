@@ -189,66 +189,10 @@ export interface TextStyle {
   hAlign?: 'left' | 'center' | 'right';
   vAlign?: 'top' | 'middle' | 'bottom';
   rect: { x: number; y: number; width: number; height: number };
-  pixelScale?: number; // 1 = 원래 해상도, 0.5 = 절반 해상도로 그린 뒤 키움 (원본 이미지의 뭉개진 글자에 맞추기)
 }
-
-// 픽셀 조절의 실제 최저 배율. 슬라이더 0~100% 가 이 값~100% 에 대응한다
-export const PIXEL_SCALE_MIN = 0.97;
 
 // 편집 화면·이미지 저장·PDF 저장이 모두 이 함수로 글자를 그린다
 export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
-  const scale = Math.min(1, Math.max(PIXEL_SCALE_MIN, ov.pixelScale ?? 1));
-  if (scale >= 1) return drawTextCrisp(ctx, ov);
-
-  // 100%에 아주 가까운 배율은 픽셀 격자와 맞물리는 위치에 따라 뭉개짐이 들쭉날쭉하다.
-  // 그래서 "원래 해상도"와 "최저 배율(97%)" 두 장을 그려 비율대로 섞는다 → 슬라이더에 비례해 고르게 변한다.
-  const t = (scale - PIXEL_SCALE_MIN) / (1 - PIXEL_SCALE_MIN); // 1 = 원래 해상도, 0 = 97%
-
-  // 상자보다 글자가 삐져나올 수 있어 글자 크기만큼 여유를 두고, 정수 좌표에 맞춰 1:1 로 붙인다
-  const pad = Math.ceil(ov.fontSize);
-  const ox = Math.floor(ov.rect.x - pad);
-  const oy = Math.floor(ov.rect.y - pad);
-  const W = Math.ceil(ov.rect.x + ov.rect.width + pad) - ox;
-  const H = Math.ceil(ov.rect.y + ov.rect.height + pad) - oy;
-  const layer = (draw: (c: CanvasRenderingContext2D) => void) => {
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = H;
-    draw(c.getContext('2d')!);
-    return c;
-  };
-
-  // 저해상도: 97% 크기로 그린 뒤 원래 크기로 부드럽게 키운다
-  const s = PIXEL_SCALE_MIN;
-  const small = document.createElement('canvas');
-  small.width = Math.ceil(W * s);
-  small.height = Math.ceil(H * s);
-  const sctx = small.getContext('2d')!;
-  sctx.scale(s, s);
-  sctx.translate(-ox, -oy);
-  drawTextCrisp(sctx, ov);
-  const soft = layer(c => {
-    c.imageSmoothingEnabled = true;
-    c.imageSmoothingQuality = 'high';
-    c.drawImage(small, 0, 0, W * s, H * s, 0, 0, W, H);
-  });
-
-  // 'lighter' 합성은 (미리 곱한 알파 기준) 더하기라, 가중치 t / 1-t 로 그리면 정확한 선형 혼합이 된다
-  const mixed = layer(c => {
-    c.globalCompositeOperation = 'lighter';
-    if (t > 0) {
-      const crisp = layer(cc => { cc.translate(-ox, -oy); drawTextCrisp(cc, ov); });
-      c.globalAlpha = t;
-      c.drawImage(crisp, 0, 0);
-    }
-    c.globalAlpha = 1 - t;
-    c.drawImage(soft, 0, 0);
-  });
-
-  ctx.drawImage(mixed, ox, oy);
-};
-
-const drawTextCrisp = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
   const { cssWeight } = resolveWeight(ov.fontFamily, ov.fontWeight);
   ctx.save();
   ctx.fillStyle = ov.fontColor;

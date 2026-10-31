@@ -1,0 +1,2 @@
+# 배치 파일은 CRLF 가 아니면 cmd 에서 한글이 깨진다
+*.bat text eol=crlf working-tree-encoding=CP949

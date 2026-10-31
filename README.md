@@ -9,6 +9,7 @@ PDF/이미지 슬라이드의 글자를 지우고 바꿔 쓰는 로컬 편집기
 1. 패키지 설치: `npm install`
 2. `.env.example` 을 `.env.local` 로 복사하고 `GEMINI_API_KEY` 에 키 넣기 — https://aistudio.google.com/apikey 에서 발급 (`.env.local` 은 git 에 올라가지 않음)
 3. 실행: `npm run dev` → http://localhost:3000
+   - Windows 에서는 `run.bat` 을 더블클릭해도 된다 (패키지가 없으면 설치하고, 브라우저를 자동으로 연다)
 
 무료 등급은 하루 20회 제한이 있고, 분석 한 번에 2회(글자 인식 + 글씨체 비교)를 쓴다. 한도를 풀려면 API 키 프로젝트에 결제를 연결한다.
 

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
-import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT, PIXEL_SCALE_MIN } from '../services/fontService';
+import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT } from '../services/fontService';
 import { 
   Loader2, 
   Type as TypeIcon, 
@@ -71,11 +71,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [vAlign, setVAlign] = useState<VerticalAlign>('top');
   const [hAlign, setHAlign] = useState<HorizontalAlign>('left');
   const [letterSpacing, setLetterSpacing] = useState(0);
-  const [pixelScale, setPixelScale] = useState(1); // 실제 해상도 배율, 1 = 원래 해상도
-
-  // 픽셀 조절 슬라이더 0~100% 는 실제 배율 97~100% 에 대응 (미세한 차이만 필요해서 이 구간을 넓게 펼친다)
-  const sliderToPixelScale = (v: number) => PIXEL_SCALE_MIN + (1 - PIXEL_SCALE_MIN) * (v / 100);
-  const pixelSlider = Math.round(Math.min(100, Math.max(0, ((pixelScale - PIXEL_SCALE_MIN) / (1 - PIXEL_SCALE_MIN)) * 100)));
 
   // 배경 관련 상태
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -104,7 +99,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       setVAlign(selectedOverlay.vAlign || 'top');
       setHAlign(selectedOverlay.hAlign || 'left');
       setLetterSpacing(selectedOverlay.letterSpacing || 0);
-      setPixelScale(selectedOverlay.pixelScale ?? 1);
 
       const bg = selectedOverlay.backgroundColor;
       if (bg === 'rgba(0,0,0,0)' || bg === 'transparent') {
@@ -371,6 +365,18 @@ const Sidebar: React.FC<SidebarProps> = ({
   ].filter(s => s.fonts.length);
   const gallerySample = replacementText.split('\n').find(l => l.trim())?.trim() || '바쁠수록 필요한 기록이';
 
+  // 자간 슬라이더 범위는 글자 크기에 비례 (-30% ~ +60%). 숫자 칸에는 범위 밖 값도 넣을 수 있다
+  const spacingRange = (() => {
+    const size = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16;
+    return { min: -Math.ceil(size * 0.3), max: Math.ceil(size * 0.6) };
+  })();
+  const changeSpacing = (value: number) => {
+    const v = Math.round(value * 10) / 10;
+    setLetterSpacing(v);
+    if (isEditing) updateSelectedOverlay({ letterSpacing: v });
+    return String(v);
+  };
+
   const weightValue = parseWeight(fontWeight);
   const fontDef = getFontDef(fontFamily);
   const weightLabel = WEIGHT_LABELS[String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(weightValue / 100) * 100)))];
@@ -405,8 +411,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       backgroundColor: isTransparent ? 'rgba(0,0,0,0)' : backgroundColor,
       vAlign,
       hAlign,
-      letterSpacing,
-      pixelScale
+      letterSpacing
     });
   };
 
@@ -431,7 +436,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
       {isEditing && (
         <p className="-mt-4 mb-5 text-[11px] text-slate-500 leading-relaxed">
-          글자를 더블클릭하면 그 자리에서 바로 고칠 수 있어요. <span className="text-slate-400">방향키</span>로 1px, <span className="text-slate-400">Shift+방향키</span>로 10px씩 옮기고, <span className="text-slate-400">Delete</span> 키로 삭제해요.
+          글자를 더블클릭하면 그 자리에서 바로 고칠 수 있어요. 상자의 <span className="text-slate-400">파란 점</span>을 끌면 크기가 바뀌어요. <span className="text-slate-400">방향키</span>로 1px, <span className="text-slate-400">Shift+방향키</span>로 10px씩 옮기고, <span className="text-slate-400">Ctrl+C / Ctrl+V</span>로 같은 설정의 빈 상자를 붙여넣고, <span className="text-slate-400">Delete</span> 키로 삭제해요.
         </p>
       )}
 
@@ -735,48 +740,48 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">픽셀 조절</label>
-                <span className="text-xs text-slate-300 tabular-nums">
-                  {pixelSlider}%
-                  <span className="text-slate-500"> · {pixelScale >= 1 ? '원래 해상도' : `실제 ${(pixelScale * 100).toFixed(2)}%`}</span>
-                </span>
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                  <MoveHorizontal size={12} /> 자간 (Spacing)
+                </label>
+                <div className="flex items-center gap-2">
+                  {letterSpacing !== 0 && (
+                    <button onClick={() => changeSpacing(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="자간 0으로">초기화</button>
+                  )}
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
+                  <input
+                    key={letterSpacing}
+                    type="number"
+                    step={0.1}
+                    defaultValue={letterSpacing}
+                    onBlur={(e) => { const v = parseFloat(e.target.value); e.target.value = String(Number.isFinite(v) ? changeSpacing(v) : letterSpacing); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
+                  />
+                  <span className="text-[10px] text-slate-500">px</span>
+                </div>
               </div>
               <input
                 type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={pixelSlider}
-                onChange={(e) => {
-                  const v = sliderToPixelScale(Number(e.target.value));
-                  setPixelScale(v);
-                  if (isEditing) updateSelectedOverlay({ pixelScale: v });
-                }}
+                min={spacingRange.min}
+                max={spacingRange.max}
+                step={0.1}
+                value={Math.min(spacingRange.max, Math.max(spacingRange.min, letterSpacing))}
+                onChange={(e) => changeSpacing(Number(e.target.value))}
                 className="w-full accent-blue-500 cursor-pointer"
-                aria-label="픽셀 조절"
+                aria-label="자간"
               />
-              <p className="text-[10px] text-slate-500 leading-snug">
-                낮출수록 글자를 낮은 해상도로 그려서 원본 이미지의 뭉개진 글자처럼 보여요. 0%가 실제 해상도 97%예요.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2 col-span-2">
-                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">자간 (Spacing)</label>
-                <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg px-2">
-                  <MoveHorizontal size={14} className="text-slate-500 mr-2" />
-                  <input 
-                    type="number" 
-                    step="0.1"
-                    value={letterSpacing} 
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setLetterSpacing(val);
-                      if (isEditing) updateSelectedOverlay({ letterSpacing: val });
-                    }}
-                    className="w-full bg-transparent py-2 text-sm focus:outline-none" 
-                  />
-                </div>
+              {/* 눈금 글자를 실제 값 위치에 둔다: 좁게 = 최소, 0 = 자간 0 위치, 넓게 = 최대 (손잡이 반폭만큼 안쪽) */}
+              <div className="relative h-4 mx-[7px] text-[10px] text-slate-600">
+                <span className="absolute left-0 -translate-x-1/2">좁게</span>
+                <button
+                  onClick={() => changeSpacing(0)}
+                  title="자간 0으로"
+                  className="absolute -translate-x-1/2 hover:text-slate-300"
+                  style={{ left: `${(-spacingRange.min / (spacingRange.max - spacingRange.min)) * 100}%` }}
+                >
+                  0
+                </button>
+                <span className="absolute right-0 translate-x-1/2">넓게</span>
               </div>
             </div>
 
