@@ -176,6 +176,27 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // 마우스 4번(뒤로) 버튼: 확대·이동한 화면을 처음처럼 가운데로 되돌린다 (전체화면은 그대로)
+  // 브라우저는 이 버튼을 놓을 때 뒤로 가기를 하므로 막아서 편집 중인 내용이 날아가지 않게 한다
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 3) return;
+      e.preventDefault();
+      if (imageRef.current) fitToView(imageRef.current);
+    };
+    const block = (e: MouseEvent) => { if (e.button === 3) e.preventDefault(); };
+    el.addEventListener('mousedown', onDown);
+    el.addEventListener('mouseup', block);
+    el.addEventListener('auxclick', block);
+    return () => {
+      el.removeEventListener('mousedown', onDown);
+      el.removeEventListener('mouseup', block);
+      el.removeEventListener('auxclick', block);
+    };
+  }, []);
+
   // 휠 이벤트가 렌더보다 빠르게 연달아 와도 최신 배율을 쓰도록 ref 로 들고 있는다
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -378,7 +399,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     draw();
   }, [draw]);
 
-  // 편집툴을 열고 닫거나 창 크기가 바뀌면 캔버스 크기를 맞춰 다시 그린다
+  // 창 크기가 바뀌면 캔버스 크기를 맞춰 다시 그린다
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -465,7 +486,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   // 조작: 드래그 = 이동, Ctrl + 드래그 = 영역 선택
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 2) return;
+    if (e.button === 2 || e.button === 3) return;
     const p = getCanvasCoords(e);
 
     // 자르기 중: 손잡이 = 크기 조절, 영역 안 = 옮기기, 나머지 = 이미지 이동

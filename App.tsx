@@ -12,13 +12,11 @@ import {
   FileUp, 
   Download, 
   FileText, 
-  ChevronUp, 
-  ChevronDown, 
+  ChevronLeft, 
+  ChevronRight, 
   Trash2, 
   History,
   Image as ImageIcon,
-  PanelRightClose,
-  PanelRightOpen,
   Maximize
 } from 'lucide-react';
 
@@ -33,8 +31,6 @@ const CROP_HINTS: [string, string][] = [['모서리 Drag', '크기 조절'], ['�
 // 상단 '파일 업로드'·'전체화면' 버튼 공통 모양 (크기·글씨 동일)
 const HEADER_TOOL_BTN = 'w-[136px] flex items-center justify-center gap-2 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm font-medium whitespace-nowrap border border-slate-600';
 
-const TOOLS_OPEN_KEY = 'slideEditor.toolsOpen';
-
 const PASTE_OFFSET = 20; // 붙여넣은 텍스트 상자가 원본에서 비켜나는 거리 (이미지 픽셀)
 
 const App: React.FC = () => {
@@ -44,15 +40,6 @@ const App: React.FC = () => {
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-
-  // 오른쪽 편집툴 열기/닫기 (다음에 열어도 기억). 닫아도 내용은 그대로 두려고 숨기기만 한다
-  const [toolsOpen, setToolsOpen] = useState(() => {
-    try { return localStorage.getItem(TOOLS_OPEN_KEY) !== '0'; } catch { return true; }
-  });
-  const toggleTools = () => setToolsOpen(open => {
-    try { localStorage.setItem(TOOLS_OPEN_KEY, open ? '0' : '1'); } catch {}
-    return !open;
-  });
 
   // ---------- 실행 취소 기록 ----------
   // 바뀌기 전 슬라이드 상태를 쌓아 두고 Ctrl+Z 때 하나씩 되돌린다
@@ -137,6 +124,18 @@ const App: React.FC = () => {
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
     };
+  }, []);
+
+  // 탐색기 "연결 프로그램"으로 열었을 때: 주소의 ?open=<토큰> 으로 넘겨받은 파일을 연다
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('open');
+    if (!token || !/^[0-9a-f]{32}$/.test(token)) return;
+    window.history.replaceState(null, '', window.location.pathname); // 새로고침해도 다시 받지 않도록
+    fetch(`/__slide-editor/inbox/${token}`)
+      .then(res => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+      .then(blob => loadFile(new File([blob], blob.type === 'application/pdf' ? 'opened.pdf' : 'opened', { type: blob.type })))
+      .catch(() => alert('연결 프로그램으로 연 파일을 불러오지 못했습니다. 다시 열어 주세요.'));
   }, []);
 
   const loadFile = async (file: File) => {
@@ -381,36 +380,32 @@ const App: React.FC = () => {
         </div>
       </header>
       <main className="flex flex-1 overflow-hidden">
-        <aside className="w-20 border-r border-slate-800 bg-[#1e293b] flex flex-col items-center py-6 gap-6 shrink-0">
-          <button onClick={handleUndo} disabled={!canUndo} className="p-3 rounded-xl hover:bg-slate-700 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent" title="실행 취소 (Ctrl+Z)"><History size={24} /></button>
-          <button onClick={handleClearOverlays} className="p-3 rounded-xl hover:bg-red-900/20 hover:text-red-400 text-slate-400" title="이 슬라이드의 텍스트 상자 전체 삭제"><Trash2 size={24} /></button>
+        <aside className="w-[120px] border-r border-slate-700 bg-[#1e293b] flex flex-col p-3 gap-4 shrink-0">
+          <div className="flex flex-col gap-2">
+            <button onClick={handleUndo} disabled={!canUndo} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 hover:bg-slate-700 text-slate-300 text-xs font-medium disabled:opacity-30 disabled:hover:bg-slate-800/50" title="실행 취소 (Ctrl+Z)"><History size={18} />실행 취소</button>
+            <button onClick={handleClearOverlays} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 hover:bg-red-900/20 hover:text-red-400 text-slate-300 text-xs font-medium" title="이 슬라이드의 텍스트 상자 전체 삭제"><Trash2 size={18} />전체 삭제</button>
+          </div>
           {slides.length > 1 && (
             // 여러 장(PDF)일 때만 페이지 이동. PageUp / PageDown 키로도 넘긴다
-            <div className="flex flex-col items-center gap-1 text-slate-300">
-              <button disabled={activeSlideIdx === 0} onClick={() => setActiveSlideIdx(prev => prev - 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="이전 페이지 (PageUp)"><ChevronUp size={20} /></button>
-              <span className="text-xs font-black text-white">{activeSlideIdx + 1} / {slides.length}</span>
-              <button disabled={activeSlideIdx === slides.length - 1} onClick={() => setActiveSlideIdx(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="다음 페이지 (PageDown)"><ChevronDown size={20} /></button>
+            <div className="flex items-center justify-center gap-4 text-slate-300">
+              <button disabled={activeSlideIdx === 0} onClick={() => setActiveSlideIdx(prev => prev - 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="이전 페이지 (PageUp)"><ChevronLeft size={20} /></button>
+              <span className="text-sm font-black text-white">{activeSlideIdx + 1} / {slides.length}</span>
+              <button disabled={activeSlideIdx === slides.length - 1} onClick={() => setActiveSlideIdx(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="다음 페이지 (PageDown)"><ChevronRight size={20} /></button>
             </div>
           )}
           {slides.length > 0 && (
-            <div className="mt-2 pt-5 border-t border-slate-700 w-full px-1.5 flex flex-col gap-4">
+            <div className="bg-slate-800/50 rounded-xl border border-slate-700 px-3 py-3 flex flex-col gap-3">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">조작 방법</h3>
               {(cropRect ? CROP_HINTS : HINTS).map(([key, label]) => (
-                <div key={key} className="flex flex-col items-center gap-1 text-center">
-                  <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[9px] text-blue-400 font-bold whitespace-nowrap">{key}</span>
-                  <span className="text-[10px] leading-tight text-slate-300">{label}</span>
+                <div key={key} className="flex flex-col items-start gap-1 text-xs">
+                  <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold whitespace-nowrap">{key}</span>
+                  <span className="text-slate-300">{label}</span>
                 </div>
               ))}
             </div>
           )}
         </aside>
         <div className="flex-1 min-w-0 flex flex-col bg-slate-950 relative">
-          <button
-            onClick={toggleTools}
-            title={toolsOpen ? '편집툴 숨기기' : '편집툴 보이기'}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 py-3 pl-1.5 pr-1 rounded-l-lg bg-slate-800/90 border border-r-0 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700"
-          >
-            {toolsOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-          </button>
           {isProcessing ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -443,7 +438,7 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-        <div className={`w-72 h-full bg-[#1e293b] border-l border-slate-700 flex-col shrink-0 ${toolsOpen ? 'flex' : 'hidden'}`}>
+        <div className="w-72 h-full bg-[#1e293b] border-l border-slate-700 flex flex-col shrink-0">
         {activeSlide && (
           <ImageTools
             slide={activeSlide}

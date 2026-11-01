@@ -31,3 +31,8 @@ dist-ssr
 # 로컬 전용
 migrated_prompt_history/
 .claude/
+
+# 연결 프로그램 실행기 빌드 결과물과 넘겨받은 파일
+launcher/*.exe
+launcher/*.ico
+.inbox/
