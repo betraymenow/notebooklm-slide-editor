@@ -19,6 +19,50 @@ const handlePoints = (r: Rect): Point[] => [
 const handleCursor = (h: HandleType) =>
   h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize';
 
+/**
+ * 자르기 영역 손잡이를 끌었을 때의 새 영역. 이미지(W×H) 밖으로는 못 나가고,
+ * 비율이 정해져 있으면 반대쪽 모서리(변 손잡이면 반대쪽 변의 가운데)를 고정한 채 비율을 지킨다.
+ */
+const resizeCrop = (r: Rect, handle: HandleType, dx: number, dy: number, ratio: number | null, W: number, H: number): Rect => {
+  const east = handle.includes('e'), west = handle.includes('w');
+  const south = handle.includes('s'), north = handle.includes('n');
+  if (!ratio) {
+    let left = r.x, top = r.y, right = r.x + r.width, bottom = r.y + r.height;
+    if (west) left = Math.min(Math.max(0, left + dx), right - MIN_RECT_SIZE);
+    if (east) right = Math.max(Math.min(W, right + dx), left + MIN_RECT_SIZE);
+    if (north) top = Math.min(Math.max(0, top + dy), bottom - MIN_RECT_SIZE);
+    if (south) bottom = Math.max(Math.min(H, bottom + dy), top + MIN_RECT_SIZE);
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+  const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+  const anchorX = east ? r.x : r.x + r.width;
+  const anchorY = south ? r.y : r.y + r.height;
+  const wFromX = r.width + (east ? dx : west ? -dx : 0);
+  const wFromY = (r.height + (south ? dy : north ? -dy : 0)) * ratio;
+  let w = (east || west) && (north || south) ? Math.max(wFromX, wFromY) : east || west ? wFromX : wFromY;
+  const maxW = Math.min(
+    east ? W - anchorX : west ? anchorX : 2 * Math.min(cx, W - cx),
+    (south ? H - anchorY : north ? anchorY : 2 * Math.min(cy, H - cy)) * ratio,
+  );
+  w = Math.min(maxW, Math.max(MIN_RECT_SIZE * Math.max(1, ratio), w));
+  const h = w / ratio;
+  return {
+    x: east ? anchorX : west ? anchorX - w : cx - w / 2,
+    y: south ? anchorY : north ? anchorY - h : cy - h / 2,
+    width: w,
+    height: h,
+  };
+};
+
+const STAGE_ID = 'editor-stage';
+const FIT_MARGIN = 80; // 화면 맞춤 때 이미지 둘레 여백 (전체화면에서는 0)
+
+/** 이미지 편집 영역만 모니터 전체화면으로 켜고 끈다 (상단 버튼·우클릭) */
+export const toggleEditorFullscreen = () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.getElementById(STAGE_ID)?.requestFullscreen().catch(() => {});
+};
+
 interface EditorCanvasProps {
   slide: SlideData;
   selectedOverlayId: string | null;
@@ -27,6 +71,9 @@ interface EditorCanvasProps {
   onUpdateOverlays: (overlays: TextOverlay[]) => void;
   editRequestId?: string | null;        // 이 상자를 바로 글자 입력 상태로 연다 (붙여넣기 직후)
   onEditRequestHandled?: () => void;
+  cropRect?: Rect | null;               // 자르기 중이면 자를 영역 (이미지 좌표)
+  cropRatio?: number | null;            // 가로/세로 비율 고정 (null = 자유)
+  onCropChange?: (rect: Rect) => void;
 }
 
 const EditorCanvas: React.FC<EditorCanvasProps> = ({ 
@@ -36,7 +83,10 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   onOverlaySelect,
   onUpdateOverlays,
   editRequestId,
-  onEditRequestHandled
+  onEditRequestHandled,
+  cropRect,
+  cropRatio = null,
+  onCropChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -91,26 +141,40 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     };
   }, []);
 
+  // 이미지를 편집 영역 가운데에 꽉 차게 맞춘다
+  const fitToView = (img: HTMLImageElement) => {
+    if (!containerRef.current) return;
+    const { clientWidth, clientHeight } = containerRef.current;
+    const margin = document.fullscreenElement === containerRef.current ? 0 : FIT_MARGIN;
+    // 창이 아주 작으면 여백을 빼고 음수가 될 수 있어 최소 배율로 막는다
+    const scale = Math.max(MIN_ZOOM, Math.min(
+      (clientWidth - margin) / img.width,
+      (clientHeight - margin) / img.height
+    ));
+    setZoom(scale);
+    setOffset({
+      x: (clientWidth - img.width * scale) / 2,
+      y: (clientHeight - img.height * scale) / 2
+    });
+  };
+
   useEffect(() => {
     const img = new Image();
     img.src = slide.dataUrl;
     img.onload = () => {
       setImage(img);
-      if (containerRef.current) {
-        const { clientWidth, clientHeight } = containerRef.current;
-        // 창이 아주 작으면 여백(80px)을 빼고 음수가 될 수 있어 최소 배율로 막는다
-        const scale = Math.max(MIN_ZOOM, Math.min(
-          (clientWidth - 80) / img.width,
-          (clientHeight - 80) / img.height
-        ));
-        setZoom(scale);
-        setOffset({
-          x: (clientWidth - img.width * scale) / 2,
-          y: (clientHeight - img.height * scale) / 2
-        });
-      }
+      fitToView(img);
     };
   }, [slide.dataUrl]);
+
+  // 전체화면을 켜고 끌 때마다 바뀐 크기에 맞춰 다시 맞춤
+  const imageRef = useRef(image);
+  imageRef.current = image;
+  useEffect(() => {
+    const onChange = () => requestAnimationFrame(() => { if (imageRef.current) fitToView(imageRef.current); });
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   // 휠 이벤트가 렌더보다 빠르게 연달아 와도 최신 배율을 쓰도록 ref 로 들고 있는다
   const zoomRef = useRef(zoom);
@@ -184,6 +248,30 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       });
     };
 
+    // 자르기 중: 잘려 나갈 바깥은 어둡게, 남을 영역에는 3분할 안내선과 손잡이
+    if (cropRect) {
+      const c = cropRect;
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+      ctx.beginPath();
+      ctx.rect(0, 0, image.width, image.height);
+      ctx.rect(c.x, c.y, c.width, c.height);
+      ctx.fill('evenodd');
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.lineWidth = 1 / zoom;
+      ctx.beginPath();
+      for (let i = 1; i < 3; i++) {
+        ctx.moveTo(c.x + (c.width * i) / 3, c.y); ctx.lineTo(c.x + (c.width * i) / 3, c.y + c.height);
+        ctx.moveTo(c.x, c.y + (c.height * i) / 3); ctx.lineTo(c.x + c.width, c.y + (c.height * i) / 3);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2 / zoom;
+      ctx.strokeRect(c.x, c.y, c.width, c.height);
+      drawHandles(c);
+      ctx.restore();
+      return;
+    }
+
     // 선택한 텍스트 상자: 글자 위에 크기 조절 손잡이를 그린다
     const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
     if (selectedOverlay) drawHandles(selectedOverlay.rect);
@@ -198,7 +286,25 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
 
     ctx.restore();
-  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId]);
+  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect]);
+
+  // Esc = Ctrl + 드래그로 잡은 영역(아직 적용 전인 텍스트 상자) 취소
+  useEffect(() => {
+    if (!selection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return;
+      e.preventDefault();
+      setIsDrawing(false);
+      setIsResizingSelection(false);
+      setStartPoint(null);
+      setSelection(null);
+      onSelectionChange(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selection]);
 
   // 텍스트 상자가 선택되면(적용 직후 포함) 영역 선택 표시는 지운다 — 남아 있으면 상자를 옮겨도 파란 영역이 제자리에 보인다
   useEffect(() => {
@@ -237,6 +343,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
+    if (cropRect) return;
     const p = getCanvasCoords(e);
     const hit = [...slide.overlays].reverse().find(o => isPointInRect(p, o.rect));
     if (hit) startEditing(hit);
@@ -270,6 +377,15 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   useEffect(() => {
     draw();
   }, [draw]);
+
+  // 편집툴을 열고 닫거나 창 크기가 바뀌면 캔버스 크기를 맞춰 다시 그린다
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => setFontsVersion(v => v + 1));
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
   // 웹폰트가 늦게 도착하면 다시 그린다
   useEffect(() => {
@@ -339,6 +455,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     return { x, y, width, height };
   };
 
+  const cropDragRef = useRef<{ kind: 'move' | HandleType; start: Point; rect: Rect } | null>(null);
+
   const startPan = (e: React.MouseEvent) => {
     setIsPanning(true);
     setStartPoint(getScreenCoords(e));
@@ -349,6 +467,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2) return;
     const p = getCanvasCoords(e);
+
+    // 자르기 중: 손잡이 = 크기 조절, 영역 안 = 옮기기, 나머지 = 이미지 이동
+    if (cropRect) {
+      if (isSpacePressed || e.button === 1) { startPan(e); return; }
+      const handle = getHandleAt(p, cropRect);
+      if (handle || isPointInRect(p, cropRect)) {
+        cropDragRef.current = { kind: handle || 'move', start: p, rect: { ...cropRect } };
+        return;
+      }
+      startPan(e);
+      return;
+    }
 
     if (e.button === 0 && (e.ctrlKey || e.metaKey) && !isSpacePressed) {
       onOverlaySelect(null);
@@ -402,7 +532,24 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     const screenP = getScreenCoords(e);
     const canvasP = getCanvasCoords(e);
 
-    if (canvasRef.current) {
+    if (cropRect) {
+      const drag = cropDragRef.current;
+      if (canvasRef.current) {
+        const hover = drag ? drag.kind : getHandleAt(canvasP, cropRect) || (isPointInRect(canvasP, cropRect) ? 'move' : null);
+        canvasRef.current.style.cursor = isPanning ? 'grabbing' : hover === 'move' ? 'move' : hover ? handleCursor(hover) : 'grab';
+      }
+      if (drag) {
+        const dx = canvasP.x - drag.start.x;
+        const dy = canvasP.y - drag.start.y;
+        const r = drag.rect;
+        onCropChange?.(drag.kind === 'move'
+          ? { ...r, x: Math.min(Math.max(0, r.x + dx), slide.width - r.width), y: Math.min(Math.max(0, r.y + dy), slide.height - r.height) }
+          : resizeCrop(r, drag.kind, dx, dy, cropRatio, slide.width, slide.height));
+        return;
+      }
+    }
+
+    if (canvasRef.current && !cropRect) {
       const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
       const overlayHandle = selectedOverlay && !isSpacePressed ? getHandleAt(canvasP, selectedOverlay.rect) : null;
       let cursor = 'grab';
@@ -466,7 +613,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         onSelectionChange(selection);
       }
     }
-    if (isPanning && panDistanceRef.current < 3) onOverlaySelect(null);
+    cropDragRef.current = null;
+    if (isPanning && panDistanceRef.current < 3 && !cropRect) onOverlaySelect(null);
     setIsDrawing(false);
     setIsDraggingOverlay(false);
     setIsResizingSelection(false);
@@ -477,8 +625,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#0f172a] flex items-center justify-center select-none">
-      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onContextMenu={(e) => e.preventDefault()} className="block w-full h-full" style={{ cursor: 'grab' }} />
+    <div ref={containerRef} id={STAGE_ID} className="flex-1 relative overflow-hidden bg-[#0f172a] flex items-center justify-center select-none">
+      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onContextMenu={(e) => { e.preventDefault(); toggleEditorFullscreen(); }} className="block w-full h-full" style={{ cursor: 'grab' }} />
       {editingOverlay && (
         <textarea
           ref={editorRef}
@@ -494,22 +642,6 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
           style={editorStyle}
         />
       )}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-slate-800/90 px-5 py-2.5 rounded-full text-xs font-medium text-slate-200 border border-slate-700 shadow-2xl pointer-events-none flex items-center gap-5 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold">Drag</span>
-          <span>이미지 이동</span>
-        </div>
-        <div className="w-px h-3 bg-slate-600"></div>
-        <div className="flex items-center gap-2">
-          <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold">Wheel</span>
-          <span>확대 / 축소</span>
-        </div>
-        <div className="w-px h-3 bg-slate-600"></div>
-        <div className="flex items-center gap-2">
-          <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold">Ctrl + Drag</span>
-          <span>영역 선택</span>
-        </div>
-      </div>
     </div>
   );
 };

@@ -2,24 +2,38 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SlideData, Rect, TextOverlay } from './types';
 import { convertPdfToImages, downloadAsPdf } from './services/pdfService';
-import EditorCanvas from './components/EditorCanvas';
+import EditorCanvas, { toggleEditorFullscreen } from './components/EditorCanvas';
 import Sidebar from './components/Sidebar';
+import ImageTools from './components/ImageTools';
+import { CropAspect, ImageTransform, aspectRatio, cropSlide, initialCropRect, transformSlide } from './services/imageTransform';
 import { drawOverlayText, loadFont } from './services/fontService';
 import { NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
   Download, 
   FileText, 
-  ChevronLeft, 
-  ChevronRight, 
+  ChevronUp, 
+  ChevronDown, 
   Trash2, 
   History,
-  Image as ImageIcon
+  Image as ImageIcon,
+  PanelRightClose,
+  PanelRightOpen,
+  Maximize
 } from 'lucide-react';
 
 const ARROW_DELTA: Record<string, [number, number]> = {
   ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
 };
+
+// 왼쪽 도구 열의 조작 안내 (자르기 중에는 자르기 조작으로 바뀐다)
+const HINTS: [string, string][] = [['Drag', '이미지 이동'], ['Wheel', '확대 / 축소'], ['Ctrl + Drag', '영역 선택']];
+const CROP_HINTS: [string, string][] = [['모서리 Drag', '크기 조절'], ['안쪽 Drag', '영역 옮기기'], ['Wheel', '확대 / 축소']];
+
+// 상단 '파일 업로드'·'전체화면' 버튼 공통 모양 (크기·글씨 동일)
+const HEADER_TOOL_BTN = 'w-[136px] flex items-center justify-center gap-2 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm font-medium whitespace-nowrap border border-slate-600';
+
+const TOOLS_OPEN_KEY = 'slideEditor.toolsOpen';
 
 const PASTE_OFFSET = 20; // 붙여넣은 텍스트 상자가 원본에서 비켜나는 거리 (이미지 픽셀)
 
@@ -30,6 +44,15 @@ const App: React.FC = () => {
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // 오른쪽 편집툴 열기/닫기 (다음에 열어도 기억). 닫아도 내용은 그대로 두려고 숨기기만 한다
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    try { return localStorage.getItem(TOOLS_OPEN_KEY) !== '0'; } catch { return true; }
+  });
+  const toggleTools = () => setToolsOpen(open => {
+    try { localStorage.setItem(TOOLS_OPEN_KEY, open ? '0' : '1'); } catch {}
+    return !open;
+  });
 
   // ---------- 실행 취소 기록 ----------
   // 바뀌기 전 슬라이드 상태를 쌓아 두고 Ctrl+Z 때 하나씩 되돌린다
@@ -181,6 +204,44 @@ const App: React.FC = () => {
     setSelectedOverlayId(null);
   };
 
+  // ---------- 이미지 자르기·회전 ----------
+  const activeSlide = slides[activeSlideIdx];
+  const [cropAspect, setCropAspect] = useState<CropAspect | null>(null); // null = 자르기 안 함
+  const [cropRect, setCropRect] = useState<Rect | null>(null);
+  const [isTransforming, setIsTransforming] = useState(false);
+
+  const resetCrop = () => {
+    if (!cropAspect || !activeSlide) { setCropRect(null); return; }
+    setCropRect(initialCropRect(activeSlide.width, activeSlide.height, aspectRatio(cropAspect)));
+  };
+  // 비율을 바꾸거나, 슬라이드를 넘기거나, 이미지가 바뀌면(자르기·회전·실행 취소) 자를 영역을 새로 잡는다
+  useEffect(resetCrop, [cropAspect, activeSlideIdx, activeSlide?.dataUrl]);
+
+  const handleCropAspectChange = (aspect: CropAspect | null) => {
+    setCropAspect(aspect);
+    if (aspect) { setSelection(null); setSelectedOverlayId(null); }
+  };
+
+  // 이미지를 바꾸는 작업은 비동기라, 끝났을 때의 슬라이드 번호에 넣는다
+  const replaceActiveSlide = async (make: (s: SlideData) => Promise<SlideData>, key: string) => {
+    if (!activeSlide || isTransforming) return;
+    const idx = activeSlideIdx;
+    setIsTransforming(true);
+    try {
+      const next = await make(activeSlide);
+      commitSlides(prev => prev.map((s, i) => (i === idx ? next : s)), key);
+      setSelectedOverlayId(null);
+    } catch (err) {
+      console.error(err);
+      alert('이미지를 바꾸는 중 오류가 발생했습니다.');
+    } finally {
+      setIsTransforming(false);
+    }
+  };
+
+  const handleApplyCrop = () => { if (cropRect) replaceActiveSlide(s => cropSlide(s, cropRect), 'crop'); };
+  const handleTransform = (op: ImageTransform) => replaceActiveSlide(s => transformSlide(s, op), op);
+
   // ---------- 텍스트 상자 복사·붙여넣기 ----------
   // 앱 안에서만 쓰는 클립보드: 글자 설정과 상자 크기만 가져가고, 붙여넣으면 글자는 빈칸이다
   const copiedOverlayRef = useRef<TextOverlay | null>(null);
@@ -233,6 +294,10 @@ const App: React.FC = () => {
       } else if (mod && e.code === 'KeyV' && copiedOverlayRef.current) {
         e.preventDefault();
         handlePasteOverlay();
+      } else if (e.key === 'PageUp' || e.key === 'PageDown') {
+        e.preventDefault();
+        const last = slidesRef.current.length - 1;
+        setActiveSlideIdx(i => Math.min(last, Math.max(0, i + (e.key === 'PageDown' ? 1 : -1))));
       } else if (e.key === 'Delete' && selectedOverlayId) {
         e.preventDefault();
         handleDeleteOverlay(selectedOverlayId);
@@ -299,10 +364,13 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg cursor-pointer transition-colors text-sm font-medium border border-slate-600">
+          <label className={`${HEADER_TOOL_BTN} cursor-pointer`}>
             <FileUp size={18} /><span>파일 업로드</span>
             <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileUpload} />
           </label>
+          <button onClick={toggleEditorFullscreen} disabled={slides.length === 0} title="이미지를 모니터 전체화면으로 (에디터에서 우클릭해도 전환)" className={`${HEADER_TOOL_BTN} disabled:opacity-50 disabled:hover:bg-slate-700`}>
+            <Maximize size={18} /><span>전체화면</span>
+          </button>
           <div className="w-px h-6 bg-slate-700 mx-2"></div>
           <button onClick={handleDownloadImages} disabled={slides.length === 0} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-lg text-sm border border-slate-700 transition-all">
             <Download size={18} /><span>이미지 저장</span>
@@ -316,8 +384,33 @@ const App: React.FC = () => {
         <aside className="w-20 border-r border-slate-800 bg-[#1e293b] flex flex-col items-center py-6 gap-6 shrink-0">
           <button onClick={handleUndo} disabled={!canUndo} className="p-3 rounded-xl hover:bg-slate-700 text-slate-400 disabled:opacity-30 disabled:hover:bg-transparent" title="실행 취소 (Ctrl+Z)"><History size={24} /></button>
           <button onClick={handleClearOverlays} className="p-3 rounded-xl hover:bg-red-900/20 hover:text-red-400 text-slate-400" title="이 슬라이드의 텍스트 상자 전체 삭제"><Trash2 size={24} /></button>
+          {slides.length > 1 && (
+            // 여러 장(PDF)일 때만 페이지 이동. PageUp / PageDown 키로도 넘긴다
+            <div className="flex flex-col items-center gap-1 text-slate-300">
+              <button disabled={activeSlideIdx === 0} onClick={() => setActiveSlideIdx(prev => prev - 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="이전 페이지 (PageUp)"><ChevronUp size={20} /></button>
+              <span className="text-xs font-black text-white">{activeSlideIdx + 1} / {slides.length}</span>
+              <button disabled={activeSlideIdx === slides.length - 1} onClick={() => setActiveSlideIdx(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20" title="다음 페이지 (PageDown)"><ChevronDown size={20} /></button>
+            </div>
+          )}
+          {slides.length > 0 && (
+            <div className="mt-2 pt-5 border-t border-slate-700 w-full px-1.5 flex flex-col gap-4">
+              {(cropRect ? CROP_HINTS : HINTS).map(([key, label]) => (
+                <div key={key} className="flex flex-col items-center gap-1 text-center">
+                  <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[9px] text-blue-400 font-bold whitespace-nowrap">{key}</span>
+                  <span className="text-[10px] leading-tight text-slate-300">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
-        <div className="flex-1 flex flex-col bg-slate-950 relative">
+        <div className="flex-1 min-w-0 flex flex-col bg-slate-950 relative">
+          <button
+            onClick={toggleTools}
+            title={toolsOpen ? '편집툴 숨기기' : '편집툴 보이기'}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 py-3 pl-1.5 pr-1 rounded-l-lg bg-slate-800/90 border border-r-0 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700"
+          >
+            {toolsOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          </button>
           {isProcessing ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4">
               <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -333,12 +426,10 @@ const App: React.FC = () => {
                 onUpdateOverlays={handleUpdateOverlays}
                 editRequestId={editRequestId}
                 onEditRequestHandled={() => setEditRequestId(null)}
+                cropRect={cropRect}
+                cropRatio={cropAspect ? aspectRatio(cropAspect) : null}
+                onCropChange={setCropRect}
               />
-              <div className="h-12 bg-[#1e293b] border-t border-slate-800 flex items-center justify-center gap-8 shrink-0">
-                <button disabled={activeSlideIdx === 0} onClick={() => setActiveSlideIdx(prev => prev - 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20"><ChevronLeft /></button>
-                <span className="text-sm font-black text-white">{activeSlideIdx + 1} / {slides.length}</span>
-                <button disabled={activeSlideIdx === slides.length - 1} onClick={() => setActiveSlideIdx(prev => prev + 1)} className="p-1 hover:bg-slate-700 rounded-full disabled:opacity-20"><ChevronRight /></button>
-              </div>
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-8 text-center">
@@ -352,6 +443,20 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+        <div className={`w-72 h-full bg-[#1e293b] border-l border-slate-700 flex-col shrink-0 ${toolsOpen ? 'flex' : 'hidden'}`}>
+        {activeSlide && (
+          <ImageTools
+            slide={activeSlide}
+            cropAspect={cropAspect}
+            cropRect={cropRect}
+            busy={isTransforming}
+            onCropAspectChange={handleCropAspectChange}
+            onCropChange={setCropRect}
+            onApplyCrop={handleApplyCrop}
+            onResetCrop={resetCrop}
+            onTransform={handleTransform}
+          />
+        )}
         <Sidebar 
           activeSlide={slides[activeSlideIdx]} 
           selection={selection} 
@@ -360,6 +465,7 @@ const App: React.FC = () => {
           onUpdateOverlays={handleUpdateOverlays}
           onDeleteOverlay={handleDeleteOverlay}
         />
+        </div>
       </main>
       {isDragging && (
         <div className="fixed inset-0 z-50 pointer-events-none bg-blue-600/15 backdrop-blur-[2px] flex items-center justify-center p-6">
