@@ -126,16 +126,38 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 탐색기 "연결 프로그램"으로 열었을 때: 주소의 ?open=<토큰> 으로 넘겨받은 파일을 연다
+  // 탐색기 "연결 프로그램"으로 열었을 때 넘겨받은 파일을 연다
+  //  - 처음 열 때: 주소의 ?open=<토큰>
+  //  - 이 탭이 이미 열려 있을 때: 서버가 이벤트로 토큰을 보내 준다 (새 탭이 생기지 않는다)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('open');
-    if (!token || !/^[0-9a-f]{32}$/.test(token)) return;
-    window.history.replaceState(null, '', window.location.pathname); // 새로고침해도 다시 받지 않도록
-    fetch(`/__slide-editor/inbox/${token}`)
-      .then(res => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
-      .then(blob => loadFile(new File([blob], blob.type === 'application/pdf' ? 'opened.pdf' : 'opened', { type: blob.type })))
-      .catch(() => alert('연결 프로그램으로 연 파일을 불러오지 못했습니다. 다시 열어 주세요.'));
+    const openToken = (token: string) => {
+      if (!/^[0-9a-f]{32}$/.test(token)) return;
+      fetch(`/__slide-editor/inbox/${token}`)
+        .then(res => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+        .then(blob => loadFile(new File([blob], blob.type === 'application/pdf' ? 'opened.pdf' : 'opened', { type: blob.type })))
+        .catch(() => alert('연결 프로그램으로 연 파일을 불러오지 못했습니다. 다시 열어 주세요.'));
+    };
+
+    const token = new URLSearchParams(window.location.search).get('open');
+    if (token) {
+      window.history.replaceState(null, '', window.location.pathname); // 새로고침해도 다시 받지 않도록
+      openToken(token);
+    }
+
+    const tab = Math.random().toString(36).slice(2, 12);
+    const events = new EventSource(`/__slide-editor/events?tab=${tab}`);
+    events.onmessage = (e) => openToken(e.data);
+    const markActive = () => {
+      if (document.visibilityState === 'visible') fetch(`/__slide-editor/active?tab=${tab}`).catch(() => {});
+    };
+    markActive();
+    window.addEventListener('focus', markActive);
+    document.addEventListener('visibilitychange', markActive);
+    return () => {
+      events.close();
+      window.removeEventListener('focus', markActive);
+      document.removeEventListener('visibilitychange', markActive);
+    };
   }, []);
 
   const loadFile = async (file: File) => {
