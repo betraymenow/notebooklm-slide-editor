@@ -10,6 +10,7 @@ PDF/이미지 슬라이드의 글자를 지우고 바꿔 쓰는 로컬 편집기
 2. `.env.example` 을 `.env.local` 로 복사하고 `GEMINI_API_KEY` 에 키 넣기 — https://aistudio.google.com/apikey 에서 발급 (`.env.local` 은 git 에 올라가지 않음)
 3. 실행: `npm run dev` → http://localhost:3000
    - Windows 에서는 `run.bat` 을 더블클릭해도 된다 (패키지가 없으면 설치하고, 브라우저를 자동으로 연다)
+   - `make_shortcut.bat` 을 실행하면 바탕화면에 '슬라이드 편집기' 바로가기가 생긴다 (4번을 해 두었으면 실행 프로그램, 아니면 `run.bat` 을 연결)
 4. (선택) 탐색기 "연결 프로그램"에 등록: `launcher/install.bat` 실행 → 사진·PDF 를 오른쪽 클릭 → 연결 프로그램 → '슬라이드 편집기'
    - 편집기가 꺼져 있으면 켜고 크롬 새 탭으로 연다. 편집기 탭이 이미 열려 있으면 새 탭 없이 그 탭에서 열고 창을 앞으로 가져온다 (그 탭이 다른 탭 뒤에 가려져 있으면 새 탭으로 연다)
    - 해제는 `launcher/install.bat -Uninstall`
