@@ -25,7 +25,7 @@ const ARROW_DELTA: Record<string, [number, number]> = {
 };
 
 // 왼쪽 도구 열의 조작 안내 (자르기 중에는 자르기 조작으로 바뀐다)
-const HINTS: [string, string][] = [['Drag', '이미지 이동'], ['Wheel', '확대 / 축소'], ['Ctrl + Drag', '영역 선택']];
+const HINTS: [string, string][] = [['Drag', '이미지 이동'], ['E D F S', '아래 / 위 / 왼쪽 / 오른쪽 이동'], ['Wheel', '확대 / 축소'], ['Ctrl + Drag', '영역 선택']];
 const CROP_HINTS: [string, string][] = [['모서리 Drag', '크기 조절'], ['안쪽 Drag', '영역 옮기기'], ['Wheel', '확대 / 축소']];
 
 // 상단 '파일 업로드'·'전체화면' 버튼 공통 모양 (크기·글씨 동일)

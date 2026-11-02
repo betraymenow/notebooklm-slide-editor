@@ -56,6 +56,10 @@ const resizeCrop = (r: Rect, handle: HandleType, dx: number, dy: number, ratio: 
 
 const STAGE_ID = 'editor-stage';
 const FIT_MARGIN = 80; // 화면 맞춤 때 이미지 둘레 여백 (전체화면에서는 0)
+// 키보드로 이미지 옮기기: E 아래, D 위, F 왼쪽, S 오른쪽 (한 번에 화면 픽셀, Shift 는 크게)
+const PAN_KEYS: Record<string, [number, number]> = { KeyE: [0, 1], KeyD: [0, -1], KeyF: [-1, 0], KeyS: [1, 0] };
+const PAN_KEY_STEP = 40;
+const PAN_KEY_STEP_FAST = 160;
 
 /** 이미지 편집 영역만 모니터 전체화면으로 켜고 끈다 (상단 버튼·우클릭) */
 export const toggleEditorFullscreen = () => {
@@ -116,7 +120,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
 
       // Ctrl 을 누르는 순간 커서를 영역 선택 모양으로 (마우스를 안 움직여도)
       if ((e.key === 'Control' || e.key === 'Meta') && canvasRef.current) {
@@ -129,6 +133,14 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         if (isInput) return;
         setIsSpacePressed(e.type === 'keydown');
         if (e.type === 'keydown') e.preventDefault();
+        return;
+      }
+      // e.code 로 판단해야 한글 입력 상태(ㄷ, ㅇ, ㄹ, ㄴ)에서도 동작한다. Ctrl+W·Ctrl+R 같은 브라우저 단축키는 건드리지 않는다
+      const pan = PAN_KEYS[e.code];
+      if (pan && e.type === 'keydown' && !isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const step = e.shiftKey ? PAN_KEY_STEP_FAST : PAN_KEY_STEP;
+        setOffset(prev => ({ x: prev.x + pan[0] * step, y: prev.y + pan[1] * step }));
         return;
       }
       // 방향키는 App 에서 선택한 텍스트 상자 위치 미세조정에 쓴다
