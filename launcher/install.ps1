@@ -89,6 +89,8 @@ $images | ForEach-Object { $out.Write([byte[]]$_) }
 $out.Close()
 
 # 2) 실행 프로그램 빌드 (.NET Framework 에 들어 있는 C# 컴파일러)
+# 편집기 창이 열려 있으면 실행 프로그램이 아이콘을 지키느라 떠 있어 파일이 잠겨 있다
+Get-Process SlideEditor -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | ForEach-Object { $_.Kill(); $_.WaitForExit() }
 $csc = Join-Path ([Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()) 'csc.exe'
 & $csc /nologo /target:winexe /codepage:65001 /optimize "/win32icon:$ico" /r:System.Windows.Forms.dll "/out:$exe" (Join-Path $here 'SlideEditor.cs')
 if ($LASTEXITCODE -ne 0) { throw '실행 프로그램 빌드에 실패했습니다.' }

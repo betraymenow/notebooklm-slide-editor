@@ -23,7 +23,10 @@ static class Program
     const string PageTitle = "NotebookLM Slide Editor";  // index.html 의 <title>. 크롬 창 제목이 이걸로 시작한다
     const int FirstPort = 3000, LastPort = 3010;   // Vite 는 3000 이 차 있으면 다음 번호를 쓴다
     const int StartTimeoutSec = 60;
-    const string LogFile = @"launcher\server.log";  // 창이 없으니 서버 출력은 여기에 남긴다
+    const int IconWaitSec = 30;    // 창이 뜨기를 기다리는 시간
+    const int IconLingerSec = 5;   // 창이 사라진 뒤 끝나기까지 기다리는 시간 (새로고침 중 제목이 잠깐 바뀌어도 끝나지 않게)
+    const string IconKeeperMutex = @"Local\SlideEditorIconKeeper";
+    const string LogFile =@"launcher\server.log";  // 창이 없으니 서버 출력은 여기에 남긴다
     static readonly string[] Extensions = { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".pdf" };
 
     [STAThread]
@@ -35,11 +38,11 @@ static class Program
             string token = args.Length > 0 ? StageFile(root, args[0]) : null;
             string query = token != null ? "?open=" + token : "";
             int port = FindServer();
-            if (port != 0 && token != null && OpenInExistingTab(port, token)) return 0;
+            if (port != 0 && token != null && OpenInExistingTab(port, token)) { KeepWindowIcon(); return 0; }
             if (port != 0 && token == null)
             {
                 IntPtr window = FindEditorWindow();
-                if (window != IntPtr.Zero) { BringToFront(window); return 0; }
+                if (window != IntPtr.Zero) { BringToFront(window); KeepWindowIcon(); return 0; }
             }
             if (port == 0)
             {
@@ -48,6 +51,7 @@ static class Program
                 if (port == 0) throw new Exception("편집기 서버가 " + StartTimeoutSec + "초 안에 시작되지 않았습니다.\n" + LogFile + " 또는 run.bat 으로 오류 메시지를 확인해 주세요.");
             }
             OpenBrowser("http://localhost:" + port + "/" + query);
+            KeepWindowIcon();
             return 0;
         }
         catch (Exception e)
@@ -136,6 +140,13 @@ static class Program
     const int SW_RESTORE = 9;
     const byte VK_MENU = 0x12;
     const uint KEYEVENTF_KEYUP = 0x2;
+    const uint WM_GETICON = 0x7F, WM_SETICON = 0x80, IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10, SMTO_ABORTIFHUNG = 2;
+    const int ICON_SMALL = 0, ICON_BIG = 1, SM_CXSMICON = 49, SM_CYSMICON = 50;
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int cx, int cy, uint load);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
@@ -195,6 +206,59 @@ static class Program
             if (port != 0) return port;
         }
         return 0;
+    }
+
+    // 크롬 앱 창은 16px 파비콘을 늘려 작업표시줄에 보여 줘서 뭉개진다. 창에 선명한 아이콘을 직접 지정한다.
+    // 아이콘 핸들은 이 프로세스가 끝나면 사라지므로 편집기 창이 있는 동안 화면 없이 남아 있는다
+    static void KeepWindowIcon()
+    {
+        bool first;
+        using (var mutex = new Mutex(true, IconKeeperMutex, out first))
+        {
+            if (!first) return;  // 앞서 실행한 프로그램이 이미 지키고 있다
+            SetProcessDPIAware();
+            string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SlideEditor.ico");
+            // 작업표시줄 아이콘은 작은 아이콘의 1.5배(100% 배율에서 24px)로 그려진다. 그 크기를 그대로 줘야 줄어들며 흐려지지 않는다
+            int bar = GetSystemMetrics(SM_CXSMICON) * 3 / 2;
+            IntPtr big = LoadImage(IntPtr.Zero, ico, IMAGE_ICON, bar, bar, LR_LOADFROMFILE);
+            IntPtr small = LoadImage(IntPtr.Zero, ico, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE);
+            if (big == IntPtr.Zero || small == IntPtr.Zero) return;
+
+            DateTime giveUpAt = DateTime.Now.AddSeconds(IconWaitSec);
+            while (DateTime.Now < giveUpAt)
+            {
+                bool any = false;
+                EnumWindows((hWnd, lParam) =>
+                {
+                    if (!IsAppWindow(hWnd)) return true;
+                    any = true;
+                    // 크롬이 파비콘을 받으면 아이콘을 다시 바꾸므로 달라졌을 때마다 되돌린다
+                    IntPtr current;
+                    SendMessageTimeout(hWnd, WM_GETICON, (IntPtr)ICON_BIG, IntPtr.Zero, SMTO_ABORTIFHUNG, 500, out current);
+                    if (current != big)
+                    {
+                        PostMessage(hWnd, WM_SETICON, (IntPtr)ICON_BIG, big);
+                        PostMessage(hWnd, WM_SETICON, (IntPtr)ICON_SMALL, small);
+                    }
+                    return true;
+                }, IntPtr.Zero);
+                if (any) giveUpAt = DateTime.Now.AddSeconds(IconLingerSec);
+                Thread.Sleep(1000);
+            }
+            mutex.ReleaseMutex();
+        }
+    }
+
+    // 앱 창의 제목은 페이지 제목 그대로다. 일반 크롬 창은 뒤에 " - Chrome" 이 붙으므로 건드리지 않는다
+    static bool IsAppWindow(IntPtr hWnd)
+    {
+        if (!IsWindowVisible(hWnd)) return false;
+        var cls = new StringBuilder(64);
+        GetClassName(hWnd, cls, cls.Capacity);
+        if (cls.ToString() != "Chrome_WidgetWin_1") return false;
+        var text = new StringBuilder(256);
+        GetWindowText(hWnd, text, text.Capacity);
+        return text.ToString() == PageTitle;
     }
 
     static void OpenBrowser(string url)
