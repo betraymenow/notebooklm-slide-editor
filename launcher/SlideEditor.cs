@@ -50,7 +50,9 @@ static class Program
                 port = WaitForServer();
                 if (port == 0) throw new Exception("편집기 서버가 " + StartTimeoutSec + "초 안에 시작되지 않았습니다.\n" + LogFile + " 또는 run.bat 으로 오류 메시지를 확인해 주세요.");
             }
+            var before = ListAppWindows();
             OpenBrowser("http://localhost:" + port + "/" + query);
+            MaximizeNewWindow(before);
             KeepWindowIcon();
             return 0;
         }
@@ -137,7 +139,8 @@ static class Program
     }
 
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    const int SW_RESTORE = 9;
+    const int SW_RESTORE = 9, SW_MAXIMIZE = 3;
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
     const byte VK_MENU = 0x12;
     const uint KEYEVENTF_KEYUP = 0x2;
     const uint WM_GETICON = 0x7F, WM_SETICON = 0x80, IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10, SMTO_ABORTIFHUNG = 2;
@@ -259,6 +262,29 @@ static class Program
         var text = new StringBuilder(256);
         GetWindowText(hWnd, text, text.Capacity);
         return text.ToString() == PageTitle;
+    }
+
+    static System.Collections.Generic.List<IntPtr> ListAppWindows()
+    {
+        var list = new System.Collections.Generic.List<IntPtr>();
+        EnumWindows((hWnd, lParam) => { if (IsAppWindow(hWnd)) list.Add(hWnd); return true; }, IntPtr.Zero);
+        return list;
+    }
+
+    // --start-maximized 는 크롬이 이미 떠 있으면(사진을 열 때 흔하다) 무시되므로, 새로 뜬 편집기 창을 직접 최대화한다
+    static void MaximizeNewWindow(System.Collections.Generic.List<IntPtr> before)
+    {
+        DateTime giveUpAt = DateTime.Now.AddSeconds(IconWaitSec);
+        while (DateTime.Now < giveUpAt)
+        {
+            foreach (IntPtr hWnd in ListAppWindows())
+            {
+                if (before.Contains(hWnd)) continue;
+                if (!IsZoomed(hWnd)) ShowWindow(hWnd, SW_MAXIMIZE);
+                return;
+            }
+            Thread.Sleep(200);
+        }
     }
 
     static void OpenBrowser(string url)
