@@ -48,31 +48,44 @@ if ($Uninstall) {
   return
 }
 
-# 1) 아이콘: 파란 둥근 사각형에 흰 슬라이드 모양 (PNG 를 담은 .ico)
+# 1) 아이콘: 파비콘의 크기별 PNG(public/icons)를 모두 담은 .ico — Windows 가 줄여서 흐려지지 않고 맞는 크기를 골라 쓴다
+$sizes = 256, 128, 64, 48, 32, 24, 16
 Add-Type -AssemblyName System.Drawing
-$size = 256
-$bmp = New-Object System.Drawing.Bitmap $size, $size
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.SmoothingMode = 'AntiAlias'
-$path = New-Object System.Drawing.Drawing2D.GraphicsPath
-$r = 56
-$path.AddArc(0, 0, $r, $r, 180, 90); $path.AddArc($size - $r, 0, $r, $r, 270, 90)
-$path.AddArc($size - $r, $size - $r, $r, $r, 0, 90); $path.AddArc(0, $size - $r, $r, $r, 90, 90)
-$g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(37, 99, 235))), $path)
-$white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-$g.FillRectangle($white, 40, 60, 176, 120)
-$blue = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(37, 99, 235))
-$g.FillRectangle($blue, 62, 84, 96, 16); $g.FillRectangle($blue, 62, 112, 132, 10); $g.FillRectangle($blue, 62, 134, 110, 10)
-$g.FillRectangle($white, 118, 180, 20, 30); $g.FillRectangle($white, 84, 206, 88, 12)
-$g.Dispose()
-$png = New-Object System.IO.MemoryStream
-$bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
-$bytes = $png.ToArray()
-$out = New-Object System.IO.BinaryWriter ([System.IO.File]::Create($ico))
-$out.Write([UInt16]0); $out.Write([UInt16]1); $out.Write([UInt16]1)             # ICONDIR
-$out.Write([byte]0); $out.Write([byte]0); $out.Write([byte]0); $out.Write([byte]0) # 256x256
-$out.Write([UInt16]1); $out.Write([UInt16]32); $out.Write([UInt32]$bytes.Length); $out.Write([UInt32]22)
-$out.Write($bytes)
+
+# 256 은 PNG 그대로, 그 아래는 호환성이 가장 좋은 비트맵(BGRA + 투명 마스크)으로 담는다
+function Get-IconImage([int]$size) {
+  $file = Join-Path $root "public\icons\icon-$size.png"
+  if ($size -eq 256) { return ,[System.IO.File]::ReadAllBytes($file) }
+  $bmp = New-Object System.Drawing.Bitmap $file
+  $mem = New-Object System.IO.MemoryStream
+  $w = New-Object System.IO.BinaryWriter $mem
+  $maskStride = [int]([math]::Ceiling($size / 32.0)) * 4
+  $w.Write([UInt32]40); $w.Write([Int32]$size); $w.Write([Int32]($size * 2))   # BITMAPINFOHEADER (높이는 그림 + 마스크)
+  $w.Write([UInt16]1); $w.Write([UInt16]32); $w.Write([UInt32]0)
+  $w.Write([UInt32]($size * $size * 4 + $maskStride * $size))
+  $w.Write([Int32]0); $w.Write([Int32]0); $w.Write([UInt32]0); $w.Write([UInt32]0)
+  for ($y = $size - 1; $y -ge 0; $y--) {
+    for ($x = 0; $x -lt $size; $x++) {
+      $c = $bmp.GetPixel($x, $y)
+      $w.Write([byte]$c.B); $w.Write([byte]$c.G); $w.Write([byte]$c.R); $w.Write([byte]$c.A)
+    }
+  }
+  $w.Write((New-Object byte[] ($maskStride * $size)))   # 투명도는 BGRA 의 A 를 쓰므로 마스크는 비워 둔다
+  $bmp.Dispose()
+  return ,$mem.ToArray()
+}
+
+$images = @($sizes | ForEach-Object { ,(Get-IconImage $_) })
+$out =New-Object System.IO.BinaryWriter ([System.IO.File]::Create($ico))
+$out.Write([UInt16]0); $out.Write([UInt16]1); $out.Write([UInt16]$sizes.Count)   # ICONDIR
+$offset = 6 + 16 * $sizes.Count
+for ($i = 0; $i -lt $sizes.Count; $i++) {
+  $side = [byte]($sizes[$i] % 256)   # 256 은 0 으로 적는다
+  $out.Write($side); $out.Write($side); $out.Write([byte]0); $out.Write([byte]0)
+  $out.Write([UInt16]1); $out.Write([UInt16]32); $out.Write([UInt32]$images[$i].Length); $out.Write([UInt32]$offset)
+  $offset += $images[$i].Length
+}
+$images | ForEach-Object { $out.Write([byte[]]$_) }
 $out.Close()
 
 # 2) 실행 프로그램 빌드 (.NET Framework 에 들어 있는 C# 컴파일러)
@@ -100,4 +113,5 @@ foreach ($ext in $extensions) {
 Update-Shortcut $exe "$exe,0"
 
 [Win32.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+& "$env:SystemRoot\System32\ie4uinit.exe" -show  # 바뀐 아이콘이 바로 보이도록 아이콘 캐시를 새로 고친다
 Write-Host "등록했습니다. 사진을 오른쪽 클릭 → 연결 프로그램 → '$appName' 을 고르세요."
