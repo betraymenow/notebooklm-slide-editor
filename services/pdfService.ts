@@ -1,6 +1,6 @@
 
 import { SlideData } from '../types';
-import { drawOverlayText, loadFont } from './fontService';
+import { drawOverlay, loadFont } from './fontService';
 
 declare const pdfjsLib: any;
 declare const jspdf: any;
@@ -57,12 +57,7 @@ export const downloadAsPdf = (slides: SlideData[], filename: string) => {
     
     ctx.drawImage(img, 0, 0);
 
-    slide.overlays.forEach(overlay => {
-      ctx.fillStyle = overlay.backgroundColor;
-      ctx.fillRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
-      
-      drawOverlayText(ctx, overlay);
-    });
+    slide.overlays.forEach(overlay => drawOverlay(ctx, overlay));
     
     const finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);
     doc.addImage(finalDataUrl, 'JPEG', 0, 0, slide.width, slide.height);

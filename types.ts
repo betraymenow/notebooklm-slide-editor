@@ -27,6 +27,8 @@ export interface TextOverlay {
   vAlign: VerticalAlign;
   hAlign: HorizontalAlign;
   letterSpacing?: number;
+  italic?: boolean;
+  rotation?: number; // 상자 가운데를 축으로 시계 방향 각도 (도)
 }
 
 export interface SlideData {

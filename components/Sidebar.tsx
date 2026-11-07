@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
+import { normalizeAngle } from '../constants';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
 import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT } from '../services/fontService';
 import { 
@@ -19,6 +20,8 @@ import {
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   MoveHorizontal,
+  Italic,
+  RotateCw,
   Star,
   Trash2
 } from 'lucide-react';
@@ -71,6 +74,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [vAlign, setVAlign] = useState<VerticalAlign>('top');
   const [hAlign, setHAlign] = useState<HorizontalAlign>('left');
   const [letterSpacing, setLetterSpacing] = useState(0);
+  const [italic, setItalic] = useState(false);
+  const [rotation, setRotation] = useState(0);
 
   // 배경 관련 상태
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -86,6 +91,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setReplacementText('');
       setBackgroundColor('#ffffff');
       setIsTransparent(false);
+      setRotation(0);
     }
   }, [selection, selectedOverlayId]);
 
@@ -99,6 +105,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       setVAlign(selectedOverlay.vAlign || 'top');
       setHAlign(selectedOverlay.hAlign || 'left');
       setLetterSpacing(selectedOverlay.letterSpacing || 0);
+      setItalic(!!selectedOverlay.italic);
+      setRotation(selectedOverlay.rotation || 0);
 
       const bg = selectedOverlay.backgroundColor;
       if (bg === 'rgba(0,0,0,0)' || bg === 'transparent') {
@@ -377,6 +385,18 @@ const Sidebar: React.FC<SidebarProps> = ({
     return String(v);
   };
 
+  const changeItalic = (value: boolean) => {
+    setItalic(value);
+    if (isEditing) updateSelectedOverlay({ italic: value });
+  };
+
+  const changeRotation = (value: number) => {
+    const v = normalizeAngle(value);
+    setRotation(v);
+    if (isEditing) updateSelectedOverlay({ rotation: v });
+    return String(v);
+  };
+
   const weightValue = parseWeight(fontWeight);
   const fontDef = getFontDef(fontFamily);
   const weightLabel = WEIGHT_LABELS[String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(weightValue / 100) * 100)))];
@@ -411,7 +431,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       backgroundColor: isTransparent ? 'rgba(0,0,0,0)' : backgroundColor,
       vAlign,
       hAlign,
-      letterSpacing
+      letterSpacing,
+      italic,
+      rotation
     });
   };
 
@@ -783,6 +805,57 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </button>
                 <span className="absolute right-0 translate-x-1/2">넓게</span>
               </div>
+            </div>
+
+            <button
+              onClick={() => changeItalic(!italic)}
+              aria-pressed={italic}
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded border text-xs font-medium transition-colors ${italic ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+            >
+              <Italic size={14} /> 글자 기울이기
+            </button>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                  <RotateCw size={12} /> 회전 (Rotate)
+                </label>
+                <div className="flex items-center gap-2">
+                  {rotation !== 0 && (
+                    <button onClick={() => changeRotation(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="회전 0°로">초기화</button>
+                  )}
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
+                  <input
+                    key={rotation}
+                    type="number"
+                    step={0.1}
+                    defaultValue={rotation}
+                    onBlur={(e) => { const v = parseFloat(e.target.value); e.target.value = Number.isFinite(v) ? changeRotation(v) : String(rotation); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
+                    aria-label="회전 각도"
+                  />
+                  <span className="text-[10px] text-slate-500">°</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={0.1}
+                value={rotation}
+                onChange={(e) => changeRotation(Number(e.target.value))}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="회전"
+              />
+              <div className="grid grid-cols-3 gap-3">
+                <button onClick={() => changeRotation(rotation - 90)} className="py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-[10px] text-slate-300">-90°</button>
+                <button onClick={() => changeRotation(0)} className="py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-[10px] text-slate-300">0°</button>
+                <button onClick={() => changeRotation(rotation + 90)} className="py-1 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-[10px] text-slate-300">+90°</button>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-snug">
+                상자 위의 동그란 손잡이를 끌어서 돌릴 수도 있어요. Shift 를 누르면 15°씩 맞춰요.
+              </p>
             </div>
 
             {!isEditing && (

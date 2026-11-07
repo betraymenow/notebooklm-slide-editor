@@ -1,8 +1,8 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { SlideData, Rect, Point, HandleType, TextOverlay } from '../types';
-import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM } from '../constants';
-import { drawOverlayText, loadFont, fontStack, resolveWeight } from '../services/fontService';
+import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, ROTATE_HANDLE_GAP, ROTATE_SNAP, normalizeAngle } from '../constants';
+import { applyOverlayRotation, drawOverlayText, loadFont, fontStack, resolveWeight } from '../services/fontService';
 
 // 사각형의 8개 손잡이 위치 (모서리 4 + 변 가운데 4)
 const handlePoints = (r: Rect): Point[] => [
@@ -18,6 +18,30 @@ const handlePoints = (r: Rect): Point[] => [
 
 const handleCursor = (h: HandleType) =>
   h === 'n' || h === 's' ? 'ns-resize' : h === 'e' || h === 'w' ? 'ew-resize' : h === 'nw' || h === 'se' ? 'nwse-resize' : 'nesw-resize';
+
+// 돌아간 상자의 손잡이는 돌아간 방향에 맞는 커서를 보여 준다
+const HANDLE_ORDER: HandleType[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+const rotatedHandleCursor = (h: HandleType, rotation = 0) =>
+  handleCursor(HANDLE_ORDER[(((HANDLE_ORDER.indexOf(h) + Math.round(rotation / 45)) % 8) + 8) % 8]);
+
+const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 1 1-3-6.7L21 8'/%3E%3Cpath d='M21 3v5h-5'/%3E%3C/svg%3E") 12 12, alias`;
+
+const rotateVector = (x: number, y: number, deg: number): Point => {
+  const rad = (deg * Math.PI) / 180;
+  return { x: x * Math.cos(rad) - y * Math.sin(rad), y: x * Math.sin(rad) + y * Math.cos(rad) };
+};
+
+const rectCenter = (r: Rect): Point => ({ x: r.x + r.width / 2, y: r.y + r.height / 2 });
+
+// 이미지 좌표의 점을, 상자가 돌아가지 않았을 때의 좌표로 바꾼다 (누른 위치·손잡이 판단용)
+const toOverlayLocal = (p: Point, ov: TextOverlay): Point => {
+  if (!ov.rotation) return p;
+  const c = rectCenter(ov.rect);
+  const v = rotateVector(p.x - c.x, p.y - c.y, -ov.rotation);
+  return { x: c.x + v.x, y: c.y + v.y };
+};
+
+const pointerAngle = (p: Point, c: Point) => (Math.atan2(p.y - c.y, p.x - c.x) * 180) / Math.PI;
 
 /**
  * 자르기 영역 손잡이를 끌었을 때의 새 영역. 이미지(W×H) 밖으로는 못 나가고,
@@ -103,6 +127,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [isResizingSelection, setIsResizingSelection] = useState(false);
   const [isDraggingOverlay, setIsDraggingOverlay] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [isRotatingOverlay, setIsRotatingOverlay] = useState(false);
   
   const [dragType, setDragType] = useState<'move' | HandleType | null>(null);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
@@ -262,9 +287,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     ctx.drawImage(image, 0, 0);
 
     slide.overlays.forEach(overlay => {
+      ctx.save();
+      applyOverlayRotation(ctx, overlay);
       ctx.fillStyle = overlay.backgroundColor;
       ctx.fillRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
-      
+
       if (overlay.id === selectedOverlayId) {
         ctx.strokeStyle = COLORS.primary;
         ctx.lineWidth = 2 / zoom;
@@ -272,6 +299,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       }
 
       if (overlay.id !== editingId) drawOverlayText(ctx, overlay); // 편집 중인 글자는 입력창이 대신 보여준다
+      ctx.restore();
     });
 
     const drawHandles = (rect: Rect) => {
@@ -305,9 +333,44 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       return;
     }
 
-    // 선택한 텍스트 상자: 글자 위에 크기 조절 손잡이를 그린다
+    // 선택한 텍스트 상자: 글자 위에 크기 조절 손잡이와 회전 손잡이를 그린다
     const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
-    if (selectedOverlay) drawHandles(selectedOverlay.rect);
+    if (selectedOverlay) {
+      const r = selectedOverlay.rect;
+      const knobX = r.x + r.width / 2;
+      const knobY = r.y - ROTATE_HANDLE_GAP / zoom;
+      ctx.save();
+      applyOverlayRotation(ctx, selectedOverlay);
+      drawHandles(r);
+      ctx.strokeStyle = COLORS.primary;
+      ctx.lineWidth = 2 / zoom;
+      ctx.beginPath();
+      ctx.moveTo(knobX, r.y);
+      ctx.lineTo(knobX, knobY);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.handle;
+      ctx.beginPath();
+      ctx.arc(knobX, knobY, (HANDLE_SIZE * 0.75) / zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // 돌리는 동안 현재 각도를 손잡이 옆에 보여 준다
+      if (isRotatingOverlay) {
+        const c = rectCenter(r);
+        const v = rotateVector(0, -(r.height / 2 + (ROTATE_HANDLE_GAP * 2) / zoom), selectedOverlay.rotation || 0);
+        const label = `${selectedOverlay.rotation || 0}°`;
+        ctx.font = `bold ${13 / zoom}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const w = ctx.measureText(label).width + 12 / zoom;
+        const h = 20 / zoom;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.fillRect(c.x + v.x - w / 2, c.y + v.y - h / 2, w, h);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, c.x + v.x, c.y + v.y);
+      }
+    }
 
     if (selection) {
       ctx.strokeStyle = COLORS.primary;
@@ -319,7 +382,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
 
     ctx.restore();
-  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect]);
+  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect, isRotatingOverlay]);
 
   // Esc = Ctrl + 드래그로 잡은 영역(아직 적용 전인 텍스트 상자) 취소
   useEffect(() => {
@@ -378,7 +441,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (cropRect) return;
     const p = getCanvasCoords(e);
-    const hit = [...slide.overlays].reverse().find(o => isPointInRect(p, o.rect));
+    const hit = [...slide.overlays].reverse().find(o => isPointInOverlay(p, o));
     if (hit) startEditing(hit);
   };
 
@@ -398,6 +461,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       paddingTop: padTop,
       fontFamily: fontStack(ov.fontFamily),
       fontWeight: resolveWeight(ov.fontFamily, ov.fontWeight).cssWeight,
+      fontStyle: ov.italic ? 'italic' : 'normal',
+      transform: ov.rotation ? `rotate(${ov.rotation}deg)` : undefined,
       fontSize: size,
       lineHeight: 1.2,
       letterSpacing: (ov.letterSpacing || 0) * zoom,
@@ -451,6 +516,13 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     return p.x >= rect.x && p.x <= rect.x + rect.width && p.y >= rect.y && p.y <= rect.y + rect.height;
   };
 
+  const isPointInOverlay = (p: Point, ov: TextOverlay) => isPointInRect(toOverlayLocal(p, ov), ov.rect);
+
+  const isOnRotateHandle = (p: Point, ov: TextOverlay) => {
+    const local = toOverlayLocal(p, ov);
+    return Math.hypot(local.x - (ov.rect.x + ov.rect.width / 2), local.y - (ov.rect.y - ROTATE_HANDLE_GAP / zoom)) < (HANDLE_SIZE * 1.25) / zoom;
+  };
+
   const getHandleAt = (p: Point, rect: Rect): HandleType | null => {
     const tolerance = HANDLE_SIZE / zoom;
     const hx = [rect.x, rect.x + rect.width / 2, rect.x + rect.width];
@@ -475,6 +547,9 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   // 텍스트 상자 크기 조절 중: 누른 순간의 상자·위치를 기준으로 계산해야 끌수록 어긋나지 않는다
   const overlayResizeRef = useRef<{ handle: HandleType; start: Point; rect: Rect } | null>(null);
   const [isResizingOverlay, setIsResizingOverlay] = useState(false);
+
+  // 텍스트 상자 회전 중: 누른 순간의 각도에서 마우스가 돈 만큼만 더한다 (손잡이를 잡을 때 튀지 않게)
+  const overlayRotateRef = useRef<{ center: Point; startAngle: number; rotation: number } | null>(null);
 
   const resizedRect = (r: Rect, handle: HandleType, dx: number, dy: number): Rect => {
     let { x, y, width, height } = r;
@@ -527,10 +602,16 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       return;
     }
 
-    // 선택한 텍스트 상자의 손잡이를 잡으면 크기 조절
+    // 선택한 텍스트 상자의 손잡이를 잡으면 회전 또는 크기 조절
     const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
     if (selectedOverlay) {
-      const handle = getHandleAt(p, selectedOverlay.rect);
+      if (isOnRotateHandle(p, selectedOverlay)) {
+        const center = rectCenter(selectedOverlay.rect);
+        overlayRotateRef.current = { center, startAngle: pointerAngle(p, center), rotation: selectedOverlay.rotation || 0 };
+        setIsRotatingOverlay(true);
+        return;
+      }
+      const handle = getHandleAt(toOverlayLocal(p, selectedOverlay), selectedOverlay.rect);
       if (handle) {
         overlayResizeRef.current = { handle, start: p, rect: { ...selectedOverlay.rect } };
         setIsResizingOverlay(true);
@@ -548,7 +629,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       }
     }
 
-    const clickedOverlay = [...slide.overlays].reverse().find(o => isPointInRect(p, o.rect));
+    const clickedOverlay = [...slide.overlays].reverse().find(o => isPointInOverlay(p, o));
     if (clickedOverlay) {
       onOverlaySelect(clickedOverlay.id);
       setIsDraggingOverlay(true);
@@ -584,21 +665,38 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
     if (canvasRef.current && !cropRect) {
       const selectedOverlay = slide.overlays.find(o => o.id === selectedOverlayId);
-      const overlayHandle = selectedOverlay && !isSpacePressed ? getHandleAt(canvasP, selectedOverlay.rect) : null;
+      const overlayHandle = selectedOverlay && !isSpacePressed ? getHandleAt(toOverlayLocal(canvasP, selectedOverlay), selectedOverlay.rect) : null;
       let cursor = 'grab';
       if (isPanning || isDraggingOverlay) cursor = 'grabbing';
-      else if (isResizingOverlay && overlayResizeRef.current) cursor = handleCursor(overlayResizeRef.current.handle);
+      else if (isRotatingOverlay || (selectedOverlay && !isSpacePressed && isOnRotateHandle(canvasP, selectedOverlay))) cursor = ROTATE_CURSOR;
+      else if (isResizingOverlay && overlayResizeRef.current) cursor = rotatedHandleCursor(overlayResizeRef.current.handle, selectedOverlay?.rotation);
       else if (isDrawing || ((e.ctrlKey || e.metaKey) && !isSpacePressed)) cursor = 'crosshair';
       else if (isResizingSelection && dragType && dragType !== 'move') cursor = handleCursor(dragType);
-      else if (overlayHandle) cursor = handleCursor(overlayHandle);
+      else if (overlayHandle) cursor = rotatedHandleCursor(overlayHandle, selectedOverlay?.rotation);
       else if (selection && getHandleAt(canvasP, selection)) cursor = handleCursor(getHandleAt(canvasP, selection)!);
-      else if (!isSpacePressed && slide.overlays.some(o => isPointInRect(canvasP, o.rect))) cursor = 'pointer';
+      else if (!isSpacePressed && slide.overlays.some(o => isPointInOverlay(canvasP, o))) cursor = 'pointer';
       canvasRef.current.style.cursor = cursor;
+    }
+
+    const rotate = overlayRotateRef.current;
+    if (isRotatingOverlay && rotate && selectedOverlayId) {
+      const raw = rotate.rotation + pointerAngle(canvasP, rotate.center) - rotate.startAngle;
+      const rotation = normalizeAngle(e.shiftKey ? Math.round(raw / ROTATE_SNAP) * ROTATE_SNAP : raw);
+      onUpdateOverlays(slide.overlays.map(ov => (ov.id === selectedOverlayId ? { ...ov, rotation } : ov)));
+      return;
     }
 
     const resize = overlayResizeRef.current;
     if (isResizingOverlay && resize && selectedOverlayId) {
-      const rect = resizedRect(resize.rect, resize.handle, canvasP.x - resize.start.x, canvasP.y - resize.start.y);
+      const angle = slide.overlays.find(ov => ov.id === selectedOverlayId)?.rotation || 0;
+      const d = rotateVector(canvasP.x - resize.start.x, canvasP.y - resize.start.y, -angle);
+      const rect = resizedRect(resize.rect, resize.handle, d.x, d.y);
+      // 돌아간 상자는 가운데가 움직인 방향도 돌려 줘야 반대쪽 변이 제자리에 남는다
+      const before = rectCenter(resize.rect);
+      const after = rectCenter(rect);
+      const moved = rotateVector(after.x - before.x, after.y - before.y, angle);
+      rect.x = before.x + moved.x - rect.width / 2;
+      rect.y = before.y + moved.y - rect.height / 2;
       onUpdateOverlays(slide.overlays.map(ov => (ov.id === selectedOverlayId ? { ...ov, rect } : ov)));
       return;
     }
@@ -653,6 +751,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     setIsResizingSelection(false);
     setIsResizingOverlay(false);
     overlayResizeRef.current = null;
+    setIsRotatingOverlay(false);
+    overlayRotateRef.current = null;
     setIsPanning(false);
     setStartPoint(null);
   };

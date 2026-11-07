@@ -1,7 +1,8 @@
 // 슬라이드 편집기 실행 프로그램 (install.bat 이 SlideEditor.exe 로 빌드한다)
-//  - 인수 없이 실행: 편집기를 열거나, 이미 떠 있으면 그 서버로 브라우저만 연다
+// cmd 창 없이 서버를 띄우고, 편집기를 주소창·탭이 없는 전용 창(크롬 앱 모드)으로 연다. 창을 모두 닫으면 서버도 끝난다
+//  - 인수 없이 실행: 편집기를 열거나, 이미 떠 있으면 그 창을 앞으로 가져온다
 //  - 파일 경로를 주면(탐색기 "연결 프로그램"): 그 파일을 편집기에서 바로 연다
-//    편집기 탭이 이미 떠 있으면 새 탭을 열지 않고 그 탭에서 열고, 그 창을 앞으로 가져온다
+//    편집기가 이미 떠 있으면 새 창을 열지 않고 그 창에서 열고, 창을 앞으로 가져온다
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -22,6 +23,7 @@ static class Program
     const string PageTitle = "NotebookLM Slide Editor";  // index.html 의 <title>. 크롬 창 제목이 이걸로 시작한다
     const int FirstPort = 3000, LastPort = 3010;   // Vite 는 3000 이 차 있으면 다음 번호를 쓴다
     const int StartTimeoutSec = 60;
+    const string LogFile = @"launcher\server.log";  // 창이 없으니 서버 출력은 여기에 남긴다
     static readonly string[] Extensions = { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".pdf" };
 
     [STAThread]
@@ -34,11 +36,16 @@ static class Program
             string query = token != null ? "?open=" + token : "";
             int port = FindServer();
             if (port != 0 && token != null && OpenInExistingTab(port, token)) return 0;
+            if (port != 0 && token == null)
+            {
+                IntPtr window = FindEditorWindow();
+                if (window != IntPtr.Zero) { BringToFront(window); return 0; }
+            }
             if (port == 0)
             {
                 StartServer(root);
                 port = WaitForServer();
-                if (port == 0) throw new Exception("편집기 서버가 " + StartTimeoutSec + "초 안에 시작되지 않았습니다.\nrun.bat 으로 실행해 오류 메시지를 확인해 주세요.");
+                if (port == 0) throw new Exception("편집기 서버가 " + StartTimeoutSec + "초 안에 시작되지 않았습니다.\n" + LogFile + " 또는 run.bat 으로 오류 메시지를 확인해 주세요.");
             }
             OpenBrowser("http://localhost:" + port + "/" + query);
             return 0;
@@ -163,17 +170,18 @@ static class Program
         return 0;
     }
 
-    // 서버는 최소화된 콘솔 창에서 돈다. 그 창을 닫으면 편집기도 꺼진다
+    // 서버는 창 없이 돈다. 편집기 창을 모두 닫으면 서버가 스스로 끝난다 (vite.config.ts 의 AUTO_EXIT)
     static void StartServer(string root)
     {
         if (!Directory.Exists(Path.Combine(root, "node_modules")))
             throw new Exception("필요한 패키지가 설치되어 있지 않습니다.\n먼저 run.bat 을 한 번 실행해 주세요.");
-        var psi = new ProcessStartInfo("cmd.exe", "/c title NotebookLM 슬라이드 편집기 서버 && npm run dev")
+        var psi = new ProcessStartInfo("cmd.exe", "/c npm run dev > \"" + LogFile + "\" 2>&1")
         {
             WorkingDirectory = root,
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Minimized,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
+        psi.EnvironmentVariables["SLIDE_EDITOR_AUTO_EXIT"] = "1";
         Process.Start(psi);
     }
 
@@ -191,15 +199,17 @@ static class Program
 
     static void OpenBrowser(string url)
     {
-        string[] chromes = {
+        string[] browsers = {
             Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
             Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
             Environment.ExpandEnvironmentVariables(@"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+            Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
         };
-        foreach (string chrome in chromes)
+        foreach (string browser in browsers)
         {
-            if (File.Exists(chrome)) { Process.Start(chrome, url); return; }
+            if (File.Exists(browser)) { Process.Start(browser, "--app=\"" + url + "\" --start-maximized"); return; }
         }
-        Process.Start(url); // 크롬이 없으면 기본 브라우저
+        Process.Start(url); // 앱 모드를 지원하는 브라우저가 없으면 기본 브라우저
     }
 }

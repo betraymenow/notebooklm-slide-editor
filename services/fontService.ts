@@ -188,15 +188,37 @@ export interface TextStyle {
   letterSpacing?: number;
   hAlign?: 'left' | 'center' | 'right';
   vAlign?: 'top' | 'middle' | 'bottom';
+  italic?: boolean;
+  rotation?: number;
   rect: { x: number; y: number; width: number; height: number };
 }
+
+// 캔버스 좌표계를 상자 가운데를 축으로 돌린다. 호출한 쪽에서 ctx.save / restore 로 감싼다
+export const applyOverlayRotation = (ctx: CanvasRenderingContext2D, ov: Pick<TextStyle, 'rect' | 'rotation'>) => {
+  if (!ov.rotation) return;
+  const cx = ov.rect.x + ov.rect.width / 2;
+  const cy = ov.rect.y + ov.rect.height / 2;
+  ctx.translate(cx, cy);
+  ctx.rotate((ov.rotation * Math.PI) / 180);
+  ctx.translate(-cx, -cy);
+};
+
+// 이미지 저장·PDF 저장용: 상자 배경과 글자를 회전까지 적용해 그린다
+export const drawOverlay = (ctx: CanvasRenderingContext2D, ov: TextStyle & { backgroundColor: string }) => {
+  ctx.save();
+  applyOverlayRotation(ctx, ov);
+  ctx.fillStyle = ov.backgroundColor;
+  ctx.fillRect(ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
+  drawOverlayText(ctx, ov);
+  ctx.restore();
+};
 
 // 편집 화면·이미지 저장·PDF 저장이 모두 이 함수로 글자를 그린다
 export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
   const { cssWeight } = resolveWeight(ov.fontFamily, ov.fontWeight);
   ctx.save();
   ctx.fillStyle = ov.fontColor;
-  ctx.font = canvasFont(cssWeight, ov.fontSize, ov.fontFamily);
+  ctx.font = (ov.italic ? 'italic ' : '') + canvasFont(cssWeight, ov.fontSize, ov.fontFamily);
   if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
 
   const lines = ov.newText.split('\n');

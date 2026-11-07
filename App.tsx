@@ -6,7 +6,7 @@ import EditorCanvas, { toggleEditorFullscreen } from './components/EditorCanvas'
 import Sidebar from './components/Sidebar';
 import ImageTools from './components/ImageTools';
 import { CropAspect, ImageTransform, aspectRatio, cropSlide, initialCropRect, transformSlide } from './services/imageTransform';
-import { drawOverlayText, loadFont } from './services/fontService';
+import { drawOverlay, loadFont } from './services/fontService';
 import { NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
@@ -352,12 +352,7 @@ const App: React.FC = () => {
       img.onload = () => {
         ctx.drawImage(img, 0, 0);
         
-        slide.overlays.forEach(ov => {
-          ctx.fillStyle = ov.backgroundColor;
-          ctx.fillRect(ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
-          
-          drawOverlayText(ctx, ov);
-        });
+        slide.overlays.forEach(ov => drawOverlay(ctx, ov));
 
         setTimeout(() => {
           const link = document.createElement('a');
