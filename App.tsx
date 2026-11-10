@@ -5,7 +5,7 @@ import { convertPdfToImages, downloadAsPdf } from './services/pdfService';
 import EditorCanvas, { toggleEditorFullscreen } from './components/EditorCanvas';
 import Sidebar from './components/Sidebar';
 import ImageTools from './components/ImageTools';
-import { CropAspect, ImageTransform, aspectRatio, cropSlide, initialCropRect, transformSlide } from './services/imageTransform';
+import { CropAspect, ImageTransform, aspectRatio, cropSlide, fitCropToRatio, initialCropRect, transformSlide } from './services/imageTransform';
 import { drawOverlay, loadFont } from './services/fontService';
 import { NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
@@ -235,11 +235,15 @@ const App: React.FC = () => {
     if (!cropAspect || !activeSlide) { setCropRect(null); return; }
     setCropRect(initialCropRect(activeSlide.width, activeSlide.height, aspectRatio(cropAspect)));
   };
-  // 비율을 바꾸거나, 슬라이드를 넘기거나, 이미지가 바뀌면(자르기·회전·실행 취소) 자를 영역을 새로 잡는다
-  useEffect(resetCrop, [cropAspect, activeSlideIdx, activeSlide?.dataUrl]);
+  // 슬라이드를 넘기거나 이미지가 바뀌면(자르기·회전·실행 취소) 자를 영역을 새로 잡는다
+  useEffect(resetCrop, [activeSlideIdx, activeSlide?.dataUrl]);
 
   const handleCropAspectChange = (aspect: CropAspect | null) => {
     setCropAspect(aspect);
+    // 자르기를 처음 켜면 이미지 전체, 이미 잡아 둔 영역이 있으면 그 영역을 유지한 채 비율만 맞춘다
+    if (!aspect || !activeSlide) setCropRect(null);
+    else if (cropAspect && cropRect) setCropRect(fitCropToRatio(cropRect, activeSlide.width, activeSlide.height, aspectRatio(aspect)));
+    else setCropRect(initialCropRect(activeSlide.width, activeSlide.height, aspectRatio(aspect)));
     if (aspect) { setSelection(null); setSelectedOverlayId(null); }
   };
 

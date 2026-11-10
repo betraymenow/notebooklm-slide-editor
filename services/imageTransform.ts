@@ -19,7 +19,22 @@ export const initialCropRect = (width: number, height: number, ratio: number | n
   return { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h };
 };
 
-const loadImage = (src: string) =>
+// 이미 잡아 둔 영역을 새 비율에 맞춘다: 가운데와 넓이는 그대로 두고, 이미지를 벗어나면 줄이거나 안쪽으로 민다
+export const fitCropToRatio = (r: Rect, width: number, height: number, ratio: number | null): Rect => {
+  if (!ratio) return r;
+  const area = r.width * r.height;
+  let w = Math.sqrt(area * ratio);
+  let h = w / ratio;
+  const scale = Math.min(1, width / w, height / h);
+  w *= scale;
+  h *= scale;
+  const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+  const x = Math.min(Math.max(cx - w / 2, 0), width - w);
+  const y = Math.min(Math.max(cy - h / 2, 0), height - h);
+  return { x, y, width: w, height: h };
+};
+
+const loadImage =(src: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
