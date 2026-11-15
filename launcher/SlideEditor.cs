@@ -164,10 +164,16 @@ static class Program
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder name, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int max);
 
+    // 닫힌 포트에 접속해 보면 Windows 는 거절을 바로 알리지 않고 재시도하느라 포트마다 시간을 다 쓴다.
+    // 그래서 열려 있는(듣고 있는) 포트만 확인한다
     static int FindServer()
     {
+        var listening = new System.Collections.Generic.HashSet<int>();
+        foreach (var ep in System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners())
+            listening.Add(ep.Port);
         for (int port = FirstPort; port <= LastPort; port++)
         {
+            if (!listening.Contains(port)) continue;
             try
             {
                 var req = (HttpWebRequest)WebRequest.Create("http://localhost:" + port + "/__slide-editor/ping");
@@ -189,7 +195,10 @@ static class Program
     {
         if (!Directory.Exists(Path.Combine(root, "node_modules")))
             throw new Exception("필요한 패키지가 설치되어 있지 않습니다.\n먼저 run.bat 을 한 번 실행해 주세요.");
-        var psi = new ProcessStartInfo("cmd.exe", "/c npm run dev > \"" + LogFile + "\" 2>&1")
+        // npm 을 거치면 시작이 늦어지므로 vite 를 바로 띄운다 (없으면 npm run dev)
+        string vite = Path.Combine("node_modules", "vite", "bin", "vite.js");
+        string command = File.Exists(Path.Combine(root, vite)) ? "node \"" + vite + "\"" : "npm run dev";
+        var psi = new ProcessStartInfo("cmd.exe", "/c " + command + " > \"" + LogFile + "\" 2>&1")
         {
             WorkingDirectory = root,
             UseShellExecute = false,
@@ -204,7 +213,7 @@ static class Program
         DateTime until = DateTime.Now.AddSeconds(StartTimeoutSec);
         while (DateTime.Now < until)
         {
-            Thread.Sleep(500);
+            Thread.Sleep(150);
             int port = FindServer();
             if (port != 0) return port;
         }
