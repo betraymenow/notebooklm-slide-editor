@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
 import { normalizeAngle } from '../constants';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
@@ -50,7 +50,40 @@ const WEIGHT_LABELS: Record<string, string> = {
   '600': 'SemiBold', '700': 'Bold', '800': 'ExtraBold', '900': 'Black', '1000': 'ExtraBlack', normal: 'Regular', bold: 'Bold',
 };
 
-const Sidebar: React.FC<SidebarProps> = ({ 
+// 슬라이더 옆 숫자 입력란. 직접 입력은 Enter·포커스 아웃 때 적용하고(한 글자마다 범위 보정되면 입력이 안 됨),
+// 위아래 화살표 버튼·방향키로 바꾼 값은 바로 적용한다 (이때는 입력 이벤트에 inputType 이 없다)
+const NumberField: React.FC<{
+  value: number; step: number; min?: number; max?: number; label: string;
+  onCommit: (v: number) => string | number;
+}> = ({ value, step, min, max, label, onCommit }) => {
+  const ref = useRef<HTMLInputElement>(null);
+  // 슬라이더 등 바깥에서 값이 바뀌면 맞춘다 (입력 중인 값이 같으면 건드리지 않는다)
+  useEffect(() => {
+    const el = ref.current;
+    if (el && parseFloat(el.value) !== value) el.value = String(value);
+  }, [value]);
+  const commit = (el: HTMLInputElement) => {
+    const v = parseFloat(el.value);
+    el.value = String(Number.isFinite(v) ? onCommit(v) : value);
+  };
+  return (
+    <input
+      ref={ref}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      defaultValue={value}
+      aria-label={label}
+      onChange={(e) => { if (!(e.nativeEvent as InputEvent).inputType) commit(e.target); }}
+      onBlur={(e) => commit(e.target)}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
+    />
+  );
+};
+
+const Sidebar: React.FC<SidebarProps> = ({
   activeSlide, 
   selection, 
   selectedOverlayId,
@@ -718,17 +751,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-slate-400">{weightLabel}</span>
                   {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 (한 글자마다 범위 보정되면 입력이 안 됨) */}
-                  <input
-                    key={weightValue}
-                    type="number"
-                    min={MIN_WEIGHT}
-                    max={MAX_WEIGHT}
-                    step={10}
-                    defaultValue={weightValue}
-                    onBlur={(e) => { const v = parseInt(e.target.value, 10); e.target.value = Number.isFinite(v) ? changeWeight(v) : String(weightValue); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
-                  />
+                  <NumberField value={weightValue} min={MIN_WEIGHT} max={MAX_WEIGHT} step={10} onCommit={changeWeight} label="글자 두께 값" />
                 </div>
               </div>
               <input
@@ -770,15 +793,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <button onClick={() => changeSpacing(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="자간 0으로">초기화</button>
                   )}
                   {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
-                  <input
-                    key={letterSpacing}
-                    type="number"
-                    step={0.1}
-                    defaultValue={letterSpacing}
-                    onBlur={(e) => { const v = parseFloat(e.target.value); e.target.value = String(Number.isFinite(v) ? changeSpacing(v) : letterSpacing); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
-                  />
+                  <NumberField value={letterSpacing} step={0.1} onCommit={changeSpacing} label="자간 값" />
                   <span className="text-[10px] text-slate-500">px</span>
                 </div>
               </div>
@@ -825,16 +840,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <button onClick={() => changeRotation(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="회전 0°로">초기화</button>
                   )}
                   {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
-                  <input
-                    key={rotation}
-                    type="number"
-                    step={0.1}
-                    defaultValue={rotation}
-                    onBlur={(e) => { const v = parseFloat(e.target.value); e.target.value = Number.isFinite(v) ? changeRotation(v) : String(rotation); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-right text-slate-200 focus:outline-none focus:border-blue-500"
-                    aria-label="회전 각도"
-                  />
+                  <NumberField value={rotation} step={0.1} onCommit={changeRotation} label="회전 각도" />
                   <span className="text-[10px] text-slate-500">°</span>
                 </div>
               </div>
