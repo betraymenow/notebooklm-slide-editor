@@ -761,6 +761,84 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">두께</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400">{weightLabel}</span>
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 (한 글자마다 범위 보정되면 입력이 안 됨) */}
+                  <NumberField value={weightValue} min={MIN_WEIGHT} max={MAX_WEIGHT} step={10} onCommit={changeWeight} label="글자 두께 값" />
+                </div>
+              </div>
+              <input
+                type="range"
+                min={MIN_WEIGHT}
+                max={MAX_WEIGHT}
+                step={10}
+                value={weightValue}
+                onChange={(e) => changeWeight(Number(e.target.value))}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="글자 두께"
+              />
+              {/* 글꼴이 원래 가진 두께 위치 — 누르면 그 값으로 맞춘다 */}
+              <div className="relative h-4 mx-[7px]">
+                {(fontDef?.weights || []).map(w => (
+                  <button
+                    key={w}
+                    onClick={() => changeWeight(w)}
+                    title={`${WEIGHT_LABELS[String(w)] || w} (${w})`}
+                    className={`absolute -translate-x-1/2 top-0 w-2 h-2 rounded-full transition-colors ${w === weightValue ? 'bg-blue-400' : 'bg-slate-600 hover:bg-slate-400'}`}
+                    style={{ left: `${((w - MIN_WEIGHT) / (MAX_WEIGHT - MIN_WEIGHT)) * 100}%` }}
+                  />
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 leading-snug">
+                {fontDef?.variable
+                  ? '가변 글꼴이라 모든 값이 그대로 적용돼요.'
+                  : '점은 글꼴의 기본 두께예요. 사이 값은 획을 덧칠해 보정해요.'}
+              </p>
+            </div>
+
+            <button
+              onClick={() => changeItalic(!italic)}
+              aria-pressed={italic}
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded border text-xs font-medium transition-colors ${italic ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
+            >
+              <Italic size={14} /> 글자 기울이기
+            </button>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">외곽선 (Outline)</label>
+                <div className="flex items-center gap-2">
+                  {outlineWidth !== 0 && (
+                    <button onClick={() => changeOutlineWidth(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="외곽선 없애기">없음</button>
+                  )}
+                  <input
+                    type="color"
+                    value={outlineColor}
+                    onChange={(e) => changeOutlineColor(e.target.value)}
+                    className="w-6 h-6 bg-transparent border-none p-0 cursor-pointer"
+                    aria-label="외곽선 색상"
+                    title="외곽선 색상"
+                  />
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
+                  <NumberField value={outlineWidth} min={0} step={0.5} onCommit={changeOutlineWidth} label="외곽선 두께 값" />
+                  <span className="text-[10px] text-slate-500">px</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(10, Math.ceil((Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16) * 0.15))}
+                step={0.5}
+                value={outlineWidth}
+                onChange={(e) => changeOutlineWidth(Number(e.target.value))}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="외곽선 두께"
+              />
+            </div>
+
+            <div className="space-y-2">
                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">배경 색상 (Background)</label>
                <div className="flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
                  <div className="flex items-center gap-3">
@@ -802,44 +880,6 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">두께</label>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-400">{weightLabel}</span>
-                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 (한 글자마다 범위 보정되면 입력이 안 됨) */}
-                  <NumberField value={weightValue} min={MIN_WEIGHT} max={MAX_WEIGHT} step={10} onCommit={changeWeight} label="글자 두께 값" />
-                </div>
-              </div>
-              <input
-                type="range"
-                min={MIN_WEIGHT}
-                max={MAX_WEIGHT}
-                step={10}
-                value={weightValue}
-                onChange={(e) => changeWeight(Number(e.target.value))}
-                className="w-full accent-blue-500 cursor-pointer"
-                aria-label="글자 두께"
-              />
-              {/* 글꼴이 원래 가진 두께 위치 — 누르면 그 값으로 맞춘다 */}
-              <div className="relative h-4 mx-[7px]">
-                {(fontDef?.weights || []).map(w => (
-                  <button
-                    key={w}
-                    onClick={() => changeWeight(w)}
-                    title={`${WEIGHT_LABELS[String(w)] || w} (${w})`}
-                    className={`absolute -translate-x-1/2 top-0 w-2 h-2 rounded-full transition-colors ${w === weightValue ? 'bg-blue-400' : 'bg-slate-600 hover:bg-slate-400'}`}
-                    style={{ left: `${((w - MIN_WEIGHT) / (MAX_WEIGHT - MIN_WEIGHT)) * 100}%` }}
-                  />
-                ))}
-              </div>
-              <p className="text-[10px] text-slate-500 leading-snug">
-                {fontDef?.variable
-                  ? '가변 글꼴이라 모든 값이 그대로 적용돼요.'
-                  : '점은 글꼴의 기본 두께예요. 사이 값은 획을 덧칠해 보정해요.'}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                   <MoveHorizontal size={12} /> 자간 (Spacing)
                 </label>
@@ -875,46 +915,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </button>
                 <span className="absolute right-0 translate-x-1/2">넓게</span>
               </div>
-            </div>
-
-            <button
-              onClick={() => changeItalic(!italic)}
-              aria-pressed={italic}
-              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded border text-xs font-medium transition-colors ${italic ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}`}
-            >
-              <Italic size={14} /> 글자 기울이기
-            </button>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">외곽선 (Outline)</label>
-                <div className="flex items-center gap-2">
-                  {outlineWidth !== 0 && (
-                    <button onClick={() => changeOutlineWidth(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="외곽선 없애기">없음</button>
-                  )}
-                  <input
-                    type="color"
-                    value={outlineColor}
-                    onChange={(e) => changeOutlineColor(e.target.value)}
-                    className="w-6 h-6 bg-transparent border-none p-0 cursor-pointer"
-                    aria-label="외곽선 색상"
-                    title="외곽선 색상"
-                  />
-                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
-                  <NumberField value={outlineWidth} min={0} step={0.5} onCommit={changeOutlineWidth} label="외곽선 두께 값" />
-                  <span className="text-[10px] text-slate-500">px</span>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(10, Math.ceil((Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16) * 0.15))}
-                step={0.5}
-                value={outlineWidth}
-                onChange={(e) => changeOutlineWidth(Number(e.target.value))}
-                className="w-full accent-blue-500 cursor-pointer"
-                aria-label="외곽선 두께"
-              />
             </div>
 
             <div className="space-y-2">
