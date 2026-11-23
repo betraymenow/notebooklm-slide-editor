@@ -1,8 +1,9 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { SlideData, Rect, Point, HandleType, TextOverlay } from '../types';
+import { SlideData, Rect, Point, HandleType, TextOverlay, TextSelection } from '../types';
 import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, ROTATE_HANDLE_GAP, ROTATE_SNAP, normalizeAngle } from '../constants';
-import { applyOverlayRotation, drawOverlayImage, drawOverlayText, loadFont, fontStack, resolveWeight, OVERLAY_IMAGE_LOADED } from '../services/fontService';
+import { overlayFontRequests, toTextSelection, withNewText } from '../services/textStyle';
+import { applyOverlayRotation, drawOverlayImage, drawOverlayText, drawTextSelection, loadFont, fontStack, resolveWeight, OVERLAY_IMAGE_LOADED } from '../services/fontService';
 
 // 사각형의 8개 손잡이 위치 (모서리 4 + 변 가운데 4)
 const handlePoints = (r: Rect): Point[] => [
@@ -114,6 +115,8 @@ interface EditorCanvasProps {
   cropRect?: Rect | null;               // 자르기 중이면 자를 영역 (이미지 좌표)
   cropRatio?: number | null;            // 가로/세로 비율 고정 (null = 자유)
   onCropChange?: (rect: Rect) => void;
+  textSel?: TextSelection | null;       // 글자 일부를 고른 범위 (옅은 파란 띠로 보여 준다)
+  onTextSelect?: (sel: TextSelection | null) => void;
 }
 
 const EditorCanvas: React.FC<EditorCanvasProps> = ({ 
@@ -126,7 +129,9 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   onEditRequestHandled,
   cropRect,
   cropRatio = null,
-  onCropChange
+  onCropChange,
+  textSel = null,
+  onTextSelect
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -150,7 +155,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   // 더블클릭으로 캔버스 위에서 바로 글자를 고치는 중인 텍스트 상자
   const [editingId, setEditingId] = useState<string | null>(null);
-  const editOriginalRef = useRef('');
+  const editOriginalRef = useRef<Pick<TextOverlay, 'newText' | 'spans'>>({ newText: '' });
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const editingOverlay = slide.overlays.find(o => o.id === editingId);
 
@@ -320,6 +325,10 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         ctx.strokeRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
       }
 
+      // 글자 일부를 고른 범위는 글자 뒤에 옅게 칠한다 (편집칸이 열려 있으면 편집칸이 직접 보여 준다)
+      if (textSel && textSel.id === overlay.id && textSel.end > textSel.start && overlay.id !== editingId) {
+        drawTextSelection(ctx, overlay, textSel.start, textSel.end, 'rgba(59, 130, 246, 0.35)');
+      }
       if (overlay.id !== editingId) drawOverlayText(ctx, overlay); // 편집 중인 글자는 입력창이 대신 보여준다
       ctx.restore();
     });
@@ -404,7 +413,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     }
 
     ctx.restore();
-  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect, isRotatingOverlay]);
+  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect, isRotatingOverlay, textSel]);
 
   // Esc = Ctrl + 드래그로 잡은 영역(아직 적용 전인 텍스트 상자) 취소
   useEffect(() => {
@@ -442,7 +451,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   const startEditing = (overlay: TextOverlay) => {
     if (overlay.imageUrl) { onOverlaySelect(overlay.id); return; } // 겹친 이미지는 고칠 글자가 없다
-    editOriginalRef.current = overlay.newText;
+    editOriginalRef.current = { newText: overlay.newText, spans: overlay.spans };
     onOverlaySelect(overlay.id);
     setEditingId(overlay.id);
   };
@@ -458,7 +467,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   }, [editRequestId, slide.overlays]);
 
   const updateEditingText = (text: string) => {
-    onUpdateOverlays(slide.overlays.map(o => (o.id === editingId ? { ...o, newText: text } : o)));
+    onUpdateOverlays(slide.overlays.map(o => (o.id === editingId ? withNewText(o, text) : o)));
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -527,7 +536,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   }, []);
 
   useEffect(() => {
-    slide.overlays.forEach(ov => { if (!ov.imageUrl) loadFont(ov.fontFamily, ov.fontWeight, ov.newText); });
+    slide.overlays.forEach(ov => { if (!ov.imageUrl) overlayFontRequests(ov).forEach(([f, w, t]) => loadFont(f, w, t)); });
   }, [slide.overlays]);
 
   const getCanvasCoords = (e: React.MouseEvent | any): Point => {
@@ -797,10 +806,23 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
         <textarea
           ref={editorRef}
           value={editingOverlay.newText}
-          onChange={(e) => updateEditingText(e.target.value)}
+          onChange={(e) => {
+            updateEditingText(e.target.value);
+            // 글자를 치면 고른 범위가 커서로 바뀐다 (한글 조합 중에는 선택 이벤트가 안 와서 여기서 맞춘다)
+            if (editingId) onTextSelect?.(toTextSelection(editingId, e.target));
+          }}
+          onSelect={(e) => {
+            const t = e.currentTarget;
+            if (editingId) onTextSelect?.(toTextSelection(editingId, t));
+          }}
           onBlur={() => setEditingId(null)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') { updateEditingText(editOriginalRef.current); setEditingId(null); }
+            if (e.key === 'Escape') {
+              const orig = editOriginalRef.current;
+              onUpdateOverlays(slide.overlays.map(o => (o.id === editingId ? { ...o, ...orig } : o)));
+              onTextSelect?.(null);
+              setEditingId(null);
+            }
             else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) setEditingId(null);
           }}
           spellCheck={false}

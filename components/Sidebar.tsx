@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
+import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign, RunStyle, TextSelection } from '../types';
+import { applyRunStyle, styleAt, toTextSelection, withNewText } from '../services/textStyle';
 import { normalizeAngle } from '../constants';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
 import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT, getOverlayImage } from '../services/fontService';
@@ -34,6 +35,8 @@ interface SidebarProps {
   onApplyOverlay: (overlay: TextOverlay) => void;
   onUpdateOverlays: (overlays: TextOverlay[]) => void;
   onDeleteOverlay: (id: string) => void;
+  textSel: TextSelection | null;
+  onTextSelect: (sel: TextSelection | null) => void;
 }
 
 const FONT_GROUPS: { label: string; category: FontDef['category'] }[] = [
@@ -90,7 +93,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   selectedOverlayId,
   onApplyOverlay,
   onUpdateOverlays,
-  onDeleteOverlay
+  onDeleteOverlay,
+  textSel,
+  onTextSelect
 }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
@@ -118,6 +123,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isTransparent, setIsTransparent] = useState(false);
 
   const selectedOverlay = activeSlide?.overlays.find(o => o.id === selectedOverlayId);
+  // 상자 안에서 고른 글자 범위 (있으면 글자 모양 설정은 그 부분에만 적용)
+  const sel = textSel && selectedOverlay && !selectedOverlay.imageUrl && textSel.id === selectedOverlay.id
+    && textSel.end > textSel.start && textSel.start < selectedOverlay.newText.length ? textSel : null;
 
   useEffect(() => {
     if (!selection && !selectedOverlayId) {
@@ -133,18 +141,20 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   useEffect(() => {
     if (selectedOverlay) {
+      // 글자를 골라 두었으면 고른 첫 글자의 모양을, 아니면 상자 기본 모양을 보여 준다
+      const st = styleAt(selectedOverlay, sel ? sel.start : -1);
       setReplacementText(selectedOverlay.newText);
-      setFontSize(selectedOverlay.fontSize);
-      setFontWeight(selectedOverlay.fontWeight);
-      setFontColor(selectedOverlay.fontColor);
-      setFontFamily(selectedOverlay.fontFamily);
+      setFontSize(st.fontSize);
+      setFontWeight(st.fontWeight);
+      setFontColor(st.fontColor);
+      setFontFamily(st.fontFamily);
       setVAlign(selectedOverlay.vAlign || 'top');
       setHAlign(selectedOverlay.hAlign || 'left');
       setLetterSpacing(selectedOverlay.letterSpacing || 0);
-      setItalic(!!selectedOverlay.italic);
+      setItalic(st.italic);
       setRotation(selectedOverlay.rotation || 0);
-      setOutlineColor(selectedOverlay.outlineColor || '#000000');
-      setOutlineWidth(selectedOverlay.outlineWidth || 0);
+      setOutlineColor(st.outlineColor);
+      setOutlineWidth(st.outlineWidth);
 
       const bg = selectedOverlay.backgroundColor;
       if (bg === 'rgba(0,0,0,0)' || bg === 'transparent') {
@@ -155,7 +165,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
     }
     // 상자 자체가 바뀔 때마다(다른 상자 선택, 캔버스에서 더블클릭 수정, 실행 취소) 입력란을 맞춘다
-  }, [selectedOverlayId, selectedOverlay]);
+  }, [selectedOverlayId, selectedOverlay, sel?.start, sel?.end]);
 
   // 로컬 캔버스에서 주변 배경색 추출 (Mode 알고리즘 사용)
   const detectBackgroundColor = useCallback((ctx: CanvasRenderingContext2D, width: number, height: number): string => {
@@ -377,7 +387,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setFontSize(m.fontSize);
     setLetterSpacing(m.letterSpacing);
     if (selectedOverlayId) {
-      updateSelectedOverlay({ fontFamily: m.fontFamily, fontWeight: m.fontWeight, fontSize: m.fontSize, letterSpacing: m.letterSpacing });
+      updateStyle({ fontFamily: m.fontFamily, fontWeight: m.fontWeight, fontSize: m.fontSize }, { letterSpacing: m.letterSpacing });
     }
   };
 
@@ -385,7 +395,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const selectFamily = (family: string) => {
     setFontFamily(family);
     loadFont(family, fontWeight, replacementText);
-    if (isEditing) updateSelectedOverlay({ fontFamily: family });
+    if (isEditing) updateStyle({ fontFamily: family });
   };
 
   const [showGallery, setShowGallery] = useState(false);
@@ -425,7 +435,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const changeItalic = (value: boolean) => {
     setItalic(value);
-    if (isEditing) updateSelectedOverlay({ italic: value });
+    if (isEditing) updateStyle({ italic: value });
   };
 
   const changeRotation = (value: number) => {
@@ -438,12 +448,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   const changeOutlineWidth = (value: number) => {
     const v = Math.max(0, Math.round(value * 10) / 10);
     setOutlineWidth(v);
-    if (isEditing) updateSelectedOverlay({ outlineWidth: v, outlineColor });
+    if (isEditing) updateStyle({ outlineWidth: v, outlineColor });
     return String(v);
   };
   const changeOutlineColor = (value: string) => {
     setOutlineColor(value);
-    if (isEditing) updateSelectedOverlay({ outlineColor: value });
+    if (isEditing) updateStyle({ outlineColor: value });
   };
 
   const weightValue = parseWeight(fontWeight);
@@ -454,7 +464,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const w = String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(value / 10) * 10)));
     setFontWeight(w);
     loadFont(fontFamily, w, replacementText);
-    if (isEditing) updateSelectedOverlay({ fontWeight: w });
+    if (isEditing) updateStyle({ fontWeight: w });
     return w;
   };
 
@@ -464,6 +474,14 @@ const Sidebar: React.FC<SidebarProps> = ({
       ov.id === selectedOverlayId ? { ...ov, ...updates } : ov
     );
     onUpdateOverlays(newOverlays);
+  };
+
+  // 글꼴·크기·색상·두께·기울이기·외곽선: 고른 글자가 있으면 그 부분에만, 없으면 상자 전체에 적용
+  const updateStyle = (patch: RunStyle, boxPatch: Partial<TextOverlay> = {}) => {
+    if (!selectedOverlayId || !activeSlide) return;
+    onUpdateOverlays(activeSlide.overlays.map(ov => ov.id === selectedOverlayId
+      ? { ...applyRunStyle(ov, sel?.start ?? 0, sel?.end ?? 0, patch), ...boxPatch }
+      : ov));
   };
 
   const handleApply = () => {
@@ -633,11 +651,25 @@ const Sidebar: React.FC<SidebarProps> = ({
               <textarea 
                 value={replacementText} 
                 onChange={(e) => {
-                  setReplacementText(e.target.value);
-                  if (isEditing) updateSelectedOverlay({ newText: e.target.value });
-                }} 
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm h-24 resize-none focus:outline-none focus:border-blue-500 text-slate-200" 
+                  const text = e.target.value;
+                  setReplacementText(text);
+                  if (isEditing && activeSlide) onUpdateOverlays(activeSlide.overlays.map(ov => ov.id === selectedOverlayId ? withNewText(ov, text) : ov));
+                  // 글자를 치면 고른 범위가 커서로 바뀐다 (한글 조합 중에는 선택 이벤트가 안 와서 여기서 맞춘다)
+                  if (selectedOverlayId) onTextSelect(toTextSelection(selectedOverlayId, e.target));
+                }}
+                onSelect={(e) => { if (selectedOverlayId) onTextSelect(toTextSelection(selectedOverlayId, e.currentTarget)); }}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm h-24 resize-none focus:outline-none focus:border-blue-500 text-slate-200"
               />
+              {isEditing && (sel ? (
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/40 text-[11px] text-blue-200">
+                  <span className="min-w-0 truncate">고른 글자 <b className="text-white">"{selectedOverlay!.newText.slice(sel.start, sel.end)}"</b> 에만 적용돼요</span>
+                  <button onClick={() => onTextSelect(null)} className="shrink-0 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">상자 전체</button>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  글자 일부를 드래그로 고르면 글꼴·크기·색상·두께·기울이기·외곽선을 그 부분만 바꿀 수 있어요.
+                </p>
+              ))}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -738,7 +770,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
                     setFontSize(val);
-                    if (isEditing) updateSelectedOverlay({ fontSize: val });
+                    if (isEditing && Number.isFinite(val) && val > 0) updateStyle({ fontSize: val });
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" 
                 />
@@ -751,7 +783,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     value={fontColor} 
                     onChange={(e) => {
                       setFontColor(e.target.value);
-                      if (isEditing) updateSelectedOverlay({ fontColor: e.target.value });
+                      if (isEditing) updateStyle({ fontColor: e.target.value });
                     }}
                     className="w-8 h-8 bg-transparent cursor-pointer"
                   />

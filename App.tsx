@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { SlideData, Rect, TextOverlay } from './types';
+import { SlideData, Rect, TextOverlay, TextSelection } from './types';
 import { convertPdfToImages, downloadAsPdf } from './services/pdfService';
 import EditorCanvas, { toggleEditorFullscreen } from './components/EditorCanvas';
 import Sidebar from './components/Sidebar';
 import ImageTools from './components/ImageTools';
 import { CropAspect, ImageTransform, aspectRatio, cropSlide, fitCropToRatio, initialCropRect, transformSlide } from './services/imageTransform';
 import { drawOverlay, loadFont, loadOverlayImages } from './services/fontService';
+import { overlayFontRequests } from './services/textStyle';
 import { MIN_RECT_SIZE, NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
@@ -38,6 +39,9 @@ const App: React.FC = () => {
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
   const [selection, setSelection] = useState<Rect | null>(null);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  // 선택한 텍스트 상자 안에서 드래그로 고른 글자 범위 — 있으면 글자 모양 설정이 그 부분에만 적용된다
+  const [textSel, setTextSel] = useState<TextSelection | null>(null);
+  useEffect(() => { setTextSel(null); }, [selectedOverlayId, activeSlideIdx]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -338,6 +342,7 @@ const App: React.FC = () => {
       rect: { ...src.rect, x, y },
       newText: '',
       originalText: '',
+      spans: undefined, // 빈 상자로 붙이므로 일부 꾸밈은 가져오지 않는다
     };
     commitSlides(updateActiveOverlays(ovs => [...ovs, pasted]), 'paste');
     setSelection(null);
@@ -389,7 +394,7 @@ const App: React.FC = () => {
 
   const handleDownloadImages = async () => {
     await Promise.all([
-      ...slides.flatMap(s => s.overlays.filter(ov => !ov.imageUrl).map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))),
+      ...slides.flatMap(s => s.overlays.filter(ov => !ov.imageUrl).flatMap(ov => overlayFontRequests(ov).map(([f, w, t]) => loadFont(f, w, t)))),
       ...slides.map(s => loadOverlayImages(s.overlays)),
     ]);
     slides.forEach((slide, i) => {
@@ -491,6 +496,8 @@ const App: React.FC = () => {
                 cropRect={cropRect}
                 cropRatio={cropAspect ? aspectRatio(cropAspect) : null}
                 onCropChange={setCropRect}
+                textSel={textSel}
+                onTextSelect={setTextSel}
               />
             </>
           ) : (
@@ -526,6 +533,8 @@ const App: React.FC = () => {
           onApplyOverlay={handleApplyOverlay}
           onUpdateOverlays={handleUpdateOverlays}
           onDeleteOverlay={handleDeleteOverlay}
+          textSel={textSel}
+          onTextSelect={setTextSel}
         />
         </div>
       </main>

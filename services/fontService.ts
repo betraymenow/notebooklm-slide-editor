@@ -1,5 +1,7 @@
 
 // 한글 웹폰트 카탈로그 + 로더 + 이미지 기반 글씨체 매칭
+import type { StyleSpan } from '../types';
+import { styleAt, ResolvedStyle } from './textStyle';
 
 export interface FontDef {
   id: string;          // CSS font-family 이름
@@ -192,6 +194,7 @@ export interface TextStyle {
   rotation?: number;
   outlineColor?: string;
   outlineWidth?: number;
+  spans?: StyleSpan[];
   rect: { x: number; y: number; width: number; height: number };
 }
 
@@ -252,51 +255,138 @@ export const drawOverlay = (ctx: CanvasRenderingContext2D, ov: TextStyle & { bac
   ctx.restore();
 };
 
-// 편집 화면·이미지 저장·PDF 저장이 모두 이 함수로 글자를 그린다
-export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
-  const { cssWeight } = resolveWeight(ov.fontFamily, ov.fontWeight);
+// ---------- 글자 배치 ----------
+// 한 줄 안에서 모양이 같은 글자 묶음. x·y 는 그릴 위치 (textBaseline = 'top')
+export interface TextPiece {
+  text: string;
+  start: number; // newText 안에서의 글자 번호
+  style: ResolvedStyle;
+  font: string;
+  x: number;
+  y: number;
+  width: number;
+  lineTop: number;
+  lineHeight: number;
+}
+
+const pieceFont = (s: ResolvedStyle) =>
+  (s.italic ? 'italic ' : '') + canvasFont(resolveWeight(s.fontFamily, s.fontWeight).cssWeight, s.fontSize, s.fontFamily);
+
+// 'top' 기준선에서 글자 기준선(alphabetic)까지 거리. 크기가 다른 글자를 한 줄에 세울 때 기준선을 맞추려고 쓴다
+const baselineDepth = (ctx: CanvasRenderingContext2D) => {
+  ctx.textBaseline = 'alphabetic';
+  const a = ctx.measureText('가').fontBoundingBoxAscent;
+  ctx.textBaseline = 'top';
+  const t = ctx.measureText('가').fontBoundingBoxAscent;
+  return Number.isFinite(a) && Number.isFinite(t) ? a - t : 0;
+};
+
+// 상자 안 글자를 줄·모양별 조각으로 나누고 위치를 정한다. 그리기와 선택 표시가 같은 배치를 쓴다
+export const layoutOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle): TextPiece[] => {
   ctx.save();
-  ctx.fillStyle = ov.fontColor;
-  ctx.font = (ov.italic ? 'italic ' : '') + canvasFont(cssWeight, ov.fontSize, ov.fontFamily);
   if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
-
-  const lines = ov.newText.split('\n');
-  const lineHeight = ov.fontSize * 1.2;
-  const totalTextHeight = lines.length * lineHeight;
-
-  ctx.textAlign = (ov.hAlign || 'left') as CanvasTextAlign;
   ctx.textBaseline = 'top';
 
-  let tx = ov.rect.x;
-  if (ov.hAlign === 'center') tx = ov.rect.x + ov.rect.width / 2;
-  else if (ov.hAlign === 'right') tx = ov.rect.x + ov.rect.width;
+  type Raw = { text: string; start: number; style: ResolvedStyle; font: string; width: number; depth: number };
+  const lines: { pieces: Raw[]; height: number; width: number }[] = [];
+  let offset = 0;
+  for (const line of ov.newText.split('\n')) {
+    const pieces: Raw[] = [];
+    let i = 0;
+    while (i < line.length) {
+      const style = styleAt(ov, offset + i);
+      let j = i + 1;
+      while (j < line.length && sameResolved(styleAt(ov, offset + j), style)) j++;
+      const text = line.slice(i, j);
+      const font = pieceFont(style);
+      ctx.font = font;
+      pieces.push({ text, start: offset + i, style, font, width: ctx.measureText(text).width, depth: 0 });
+      i = j;
+    }
+    // 빈 줄은 줄바꿈 자리 글자의 크기로 높이를 정한다
+    const sizes = pieces.length ? pieces.map(p => p.style.fontSize) : [styleAt(ov, Math.max(0, offset - 1)).fontSize];
+    lines.push({ pieces, height: Math.max(...sizes) * 1.2, width: pieces.reduce((w, p) => w + p.width, 0) });
+    offset += line.length + 1;
+  }
+  // 크기·글꼴이 섞인 줄만 기준선을 맞춘다 (한 가지 모양이면 예전과 똑같이 그린다)
+  for (const l of lines) {
+    if (new Set(l.pieces.map(p => p.font)).size < 2) continue;
+    l.pieces.forEach(p => { ctx.font = p.font; p.depth = baselineDepth(ctx); });
+  }
+  ctx.restore();
 
-  let ty = ov.rect.y;
-  if (ov.vAlign === 'middle') ty = ov.rect.y + (ov.rect.height - totalTextHeight) / 2;
-  else if (ov.vAlign === 'bottom') ty = ov.rect.y + ov.rect.height - totalTextHeight;
+  const total = lines.reduce((h, l) => h + l.height, 0);
+  let top = ov.rect.y;
+  if (ov.vAlign === 'middle') top = ov.rect.y + (ov.rect.height - total) / 2;
+  else if (ov.vAlign === 'bottom') top = ov.rect.y + ov.rect.height - total;
 
-  // 외곽선: 선의 절반은 글자 안쪽에 그려지므로 두 배 굵기로 먼저 긋고 그 위에 글자를 채운다
-  const outline = ov.outlineWidth || 0;
-  if (outline > 0) {
-    ctx.save();
-    ctx.strokeStyle = ov.outlineColor || '#000000';
-    ctx.lineWidth = outline * 2;
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    lines.forEach((line, index) => ctx.strokeText(line, tx, ty + index * lineHeight));
-    ctx.restore();
+  const out: TextPiece[] = [];
+  for (const l of lines) {
+    let x = ov.rect.x;
+    if (ov.hAlign === 'center') x = ov.rect.x + (ov.rect.width - l.width) / 2;
+    else if (ov.hAlign === 'right') x = ov.rect.x + ov.rect.width - l.width;
+    const maxDepth = Math.max(0, ...l.pieces.map(p => p.depth));
+    for (const p of l.pieces) {
+      out.push({ text: p.text, start: p.start, style: p.style, font: p.font, x, y: top + (maxDepth - p.depth), width: p.width, lineTop: top, lineHeight: l.height });
+      x += p.width;
+    }
+    top += l.height;
+  }
+  return out;
+};
+
+const sameResolved = (a: ResolvedStyle, b: ResolvedStyle) =>
+  a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.fontWeight === b.fontWeight && a.fontColor === b.fontColor
+  && a.italic === b.italic && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth;
+
+// 편집 화면·이미지 저장·PDF 저장이 모두 이 함수로 글자를 그린다
+export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) => {
+  const pieces = layoutOverlayText(ctx, ov);
+  ctx.save();
+  if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.lineJoin = 'round';
+
+  // 외곽선: 선의 절반은 글자 안쪽에 그려지므로 두 배 굵기로 먼저 모두 긋고, 그 위에 글자를 채운다
+  ctx.miterLimit = 2;
+  for (const p of pieces) {
+    if (!(p.style.outlineWidth > 0)) continue;
+    ctx.font = p.font;
+    ctx.strokeStyle = p.style.outlineColor;
+    ctx.lineWidth = p.style.outlineWidth * 2;
+    ctx.strokeText(p.text, p.x, p.y);
   }
 
-  const stroke = extraStrokeWidth(ov.fontFamily, ov.fontWeight, ov.fontSize);
-  if (stroke > 0) {
-    ctx.strokeStyle = ov.fontColor;
-    ctx.lineWidth = stroke;
-    ctx.lineJoin = 'round';
+  for (const p of pieces) {
+    ctx.font = p.font;
+    ctx.fillStyle = p.style.fontColor;
+    ctx.fillText(p.text, p.x, p.y);
+    const stroke = extraStrokeWidth(p.style.fontFamily, p.style.fontWeight, p.style.fontSize);
+    if (stroke > 0) {
+      ctx.strokeStyle = p.style.fontColor;
+      ctx.lineWidth = stroke;
+      ctx.strokeText(p.text, p.x, p.y);
+    }
   }
-  lines.forEach((line, index) => {
-    ctx.fillText(line, tx, ty + index * lineHeight);
-    if (stroke > 0) ctx.strokeText(line, tx, ty + index * lineHeight);
-  });
+  ctx.restore();
+};
+
+// 고른 글자 [start, end) 뒤에 옅은 파란 띠를 그린다 (편집 화면 전용)
+export const drawTextSelection = (ctx: CanvasRenderingContext2D, ov: TextStyle, start: number, end: number, color: string) => {
+  const pieces = layoutOverlayText(ctx, ov);
+  ctx.save();
+  if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${ov.letterSpacing || 0}px`;
+  ctx.fillStyle = color;
+  for (const p of pieces) {
+    const a = Math.max(start, p.start) - p.start;
+    const b = Math.min(end, p.start + p.text.length) - p.start;
+    if (a >= b) continue;
+    ctx.font = p.font;
+    const x1 = p.x + ctx.measureText(p.text.slice(0, a)).width;
+    const x2 = p.x + ctx.measureText(p.text.slice(0, b)).width;
+    ctx.fillRect(x1, p.lineTop, x2 - x1, p.lineHeight);
+  }
   ctx.restore();
 };
 
