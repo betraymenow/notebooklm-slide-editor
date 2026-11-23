@@ -669,11 +669,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onSelect={(e) => { if (selectedOverlayId) onTextSelect(toTextSelection(selectedOverlayId, e.currentTarget)); }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm h-24 resize-none focus:outline-none focus:border-blue-500 text-slate-200"
               />
-              {isEditing && !sel && (
+              {isEditing && !sel && (selectedOverlay?.spans?.length ? (
+                // 아래 값은 상자 기본값이라, 따로 꾸민 글자가 있으면 그 사실을 알려 준다
+                <p className="text-[10px] text-amber-300/90 leading-snug">
+                  따로 꾸민 글자가 있어요. 아래 값은 상자 기본값이고, 꾸민 글자의 값은 그 글자를 드래그로 고르면 보여요. 지금 바꾸면 상자 전체에 적용돼요.
+                </p>
+              ) : (
                 <p className="text-[10px] text-slate-500 leading-snug">
                   글자 일부를 드래그로 고르면 글꼴·크기·색상·두께·기울이기·외곽선을 그 부분만 바꿀 수 있어요.
                 </p>
-              )}
+              ))}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

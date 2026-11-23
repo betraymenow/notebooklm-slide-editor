@@ -92,9 +92,36 @@ export const withNewText = <T extends StyledBox>(ov: T, text: string): T => {
 };
 
 // 입력칸의 선택 범위 → 글자 선택. 하나도 안 고르거나 전부 고르면 상자 전체(null)로 본다
-export const toTextSelection = (id: string, el: HTMLTextAreaElement): TextSelection | null => {
-  const { selectionStart: start, selectionEnd: end, value } = el;
-  return start === end || (start === 0 && end >= value.length) ? null : { id, start, end };
+export const makeTextSelection = (id: string, start: number, end: number, length: number): TextSelection | null => {
+  if (start > end) [start, end] = [end, start];
+  return start === end || (start === 0 && end >= length) ? null : { id, start, end };
+};
+export const toTextSelection = (id: string, el: HTMLTextAreaElement): TextSelection | null =>
+  makeTextSelection(id, el.selectionStart, el.selectionEnd, el.value.length);
+
+// 모양이 같은 글자끼리 묶는다 (줄바꿈도 그대로 포함)
+export const styleRuns = (ov: StyledBox): { text: string; style: ResolvedStyle }[] => {
+  const runs: { text: string; style: ResolvedStyle }[] = [];
+  for (let i = 0; i < ov.newText.length; i++) {
+    const style = styleAt(ov, i);
+    const last = runs[runs.length - 1];
+    if (last && sameStyle(last.style, style)) last.text += ov.newText[i];
+    else runs.push({ text: ov.newText[i], style });
+  }
+  return runs;
+};
+
+// 줄마다 가장 큰 글자 크기 (줄 높이 계산용)
+export const lineFontSizes = (ov: StyledBox): number[] => {
+  const sizes: number[] = [];
+  let offset = 0;
+  for (const line of ov.newText.split('\n')) {
+    let max = 0;
+    for (let i = 0; i < line.length; i++) max = Math.max(max, styleAt(ov, offset + i).fontSize);
+    sizes.push(max || styleAt(ov, Math.max(0, offset - 1)).fontSize);
+    offset += line.length + 1;
+  }
+  return sizes;
 };
 
 // 이 상자를 그리는 데 필요한 글꼴·두께 조합과 그 글꼴로 쓰는 글자

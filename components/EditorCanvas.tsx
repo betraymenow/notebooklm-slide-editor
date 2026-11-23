@@ -2,7 +2,30 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { SlideData, Rect, Point, HandleType, TextOverlay, TextSelection } from '../types';
 import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, ROTATE_HANDLE_GAP, ROTATE_SNAP, normalizeAngle } from '../constants';
-import { overlayFontRequests, toTextSelection, withNewText } from '../services/textStyle';
+import { lineFontSizes, makeTextSelection, overlayFontRequests, styleRuns, withNewText } from '../services/textStyle';
+
+// 서식 있는 편집칸의 글자. 줄바꿈이 <br> 로 들어가는 경우도 \n 으로 센다
+const collectText = (root: Node): string => {
+  let out = '';
+  root.childNodes.forEach(n => {
+    if (n.nodeType === Node.TEXT_NODE) out += (n as Text).data;
+    else if (n.nodeName === 'BR') out += '\n';
+    else out += collectText(n);
+  });
+  return out;
+};
+const readEditorText = (el: HTMLElement) => {
+  const text = collectText(el);
+  // 끝에 붙는 자리표시용 <br> 은 글자가 아니다
+  return el.lastChild?.nodeName === 'BR' && text.endsWith('\n') ? text.slice(0, -1) : text;
+};
+// 편집칸 안 (node, offset) 위치가 글자 몇 번째인지
+const editorTextOffset = (el: HTMLElement, node: Node, offset: number) => {
+  const r = document.createRange();
+  r.setStart(el, 0);
+  r.setEnd(node, offset);
+  return collectText(r.cloneContents()).length;
+};
 import { applyOverlayRotation, drawOverlayImage, drawOverlayText, drawTextSelection, loadFont, fontStack, resolveWeight, OVERLAY_IMAGE_LOADED } from '../services/fontService';
 
 // 사각형의 8개 손잡이 위치 (모서리 4 + 변 가운데 4)
@@ -156,7 +179,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   // 더블클릭으로 캔버스 위에서 바로 글자를 고치는 중인 텍스트 상자
   const [editingId, setEditingId] = useState<string | null>(null);
   const editOriginalRef = useRef<Pick<TextOverlay, 'newText' | 'spans'>>({ newText: '' });
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const editingOverlay = slide.overlays.find(o => o.id === editingId);
 
   useEffect(() => {
@@ -443,11 +466,53 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     if (editingId && (selectedOverlayId !== editingId || !editingOverlay)) setEditingId(null);
   }, [selectedOverlayId, editingOverlay, editingId]);
 
+  // 편집칸을 열 때: 글자를 모양별 조각으로 채우고 전체를 고른다
+  const editingOverlayRef = useRef(editingOverlay);
+  editingOverlayRef.current = editingOverlay;
   useEffect(() => {
     if (!editingId) return;
     const el = editorRef.current;
-    if (el) { el.focus(); el.select(); }
+    const ov = editingOverlayRef.current;
+    if (!el || !ov) return;
+    el.replaceChildren(...styleRuns(ov).map(r => {
+      const span = document.createElement('span');
+      const s = r.style;
+      span.style.fontFamily = fontStack(s.fontFamily);
+      span.style.fontWeight = String(resolveWeight(s.fontFamily, s.fontWeight).cssWeight);
+      span.style.fontStyle = s.italic ? 'italic' : 'normal';
+      span.style.fontSize = `calc(var(--z) * ${s.fontSize}px)`;
+      span.style.color = s.fontColor;
+      // 외곽선: 캔버스처럼 선을 글자 뒤에 깔아 바깥쪽만 보이게 한다
+      // (외곽선은 상속되므로 없는 조각도 0 으로 적어 둔다)
+      span.style.setProperty('-webkit-text-stroke', s.outlineWidth > 0 ? `calc(var(--z) * ${s.outlineWidth * 2}px) ${s.outlineColor}` : '0');
+      span.style.setProperty('paint-order', 'stroke fill');
+      span.textContent = r.text;
+      return span;
+    }));
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
   }, [editingId]);
+
+  // 편집칸 안에서 고른 범위를 글자 번호로 알린다 (마우스·Shift+방향키·입력 모두)
+  const reportEditorSelection = () => {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !editingId || !sel || !sel.rangeCount || !el.contains(sel.anchorNode)) return;
+    const r = sel.getRangeAt(0);
+    const start = editorTextOffset(el, r.startContainer, r.startOffset);
+    const end = editorTextOffset(el, r.endContainer, r.endOffset);
+    onTextSelect?.(makeTextSelection(editingId, start, end, readEditorText(el).length));
+  };
+  useEffect(() => {
+    if (!editingId) return;
+    const onChange = () => reportEditorSelection();
+    document.addEventListener('selectionchange', onChange);
+    return () => document.removeEventListener('selectionchange', onChange);
+  });
 
   const startEditing = (overlay: TextOverlay) => {
     if (overlay.imageUrl) { onOverlaySelect(overlay.id); return; } // 겹친 이미지는 고칠 글자가 없다
@@ -481,8 +546,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     if (!editingOverlay) return undefined;
     const ov = editingOverlay;
     const size = ov.fontSize * zoom;
-    const lineCount = ov.newText.split('\n').length;
-    const textH = lineCount * size * 1.2;
+    const textH = lineFontSizes(ov).reduce((h, s) => h + s * zoom * 1.2, 0);
     const boxH = ov.rect.height * zoom;
     const padTop = ov.vAlign === 'middle' ? Math.max(0, (boxH - textH) / 2) : ov.vAlign === 'bottom' ? Math.max(0, boxH - textH) : 0;
     return {
@@ -496,6 +560,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       fontStyle: ov.italic ? 'italic' : 'normal',
       transform: ov.rotation ? `rotate(${ov.rotation}deg)` : undefined,
       fontSize: size,
+      '--z': zoom, // 조각마다 글자 크기 = 확대 배율 × 원래 크기
       lineHeight: 1.2,
       letterSpacing: (ov.letterSpacing || 0) * zoom,
       color: ov.fontColor,
@@ -805,17 +870,15 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     <div ref={containerRef} id={STAGE_ID} className="flex-1 relative overflow-hidden bg-[#0f172a] flex items-center justify-center select-none">
       <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onContextMenu={(e) => { e.preventDefault(); toggleEditorFullscreen(); }} className="block w-full h-full" style={{ cursor: 'grab' }} />
       {editingOverlay && (
-        <textarea
+        // 글자 일부만 꾸민 모양까지 그대로 보이도록 서식 있는 편집칸을 쓴다.
+        // 내용은 열 때 한 번만 채우고(입력 중 React 가 다시 그리면 커서·한글 조합이 깨진다) 입력할 때마다 글자만 읽어 간다
+        <div
           ref={editorRef}
-          value={editingOverlay.newText}
-          onChange={(e) => {
-            updateEditingText(e.target.value);
-            // 글자를 치면 고른 범위가 커서로 바뀐다 (한글 조합 중에는 선택 이벤트가 안 와서 여기서 맞춘다)
-            if (editingId) onTextSelect?.(toTextSelection(editingId, e.target));
-          }}
-          onSelect={(e) => {
-            const t = e.currentTarget;
-            if (editingId) onTextSelect?.(toTextSelection(editingId, t));
+          contentEditable="plaintext-only"
+          suppressContentEditableWarning
+          onInput={(e) => {
+            updateEditingText(readEditorText(e.currentTarget));
+            reportEditorSelection();
           }}
           onBlur={() => setEditingId(null)}
           onKeyDown={(e) => {
@@ -828,7 +891,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
             else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) setEditingId(null);
           }}
           spellCheck={false}
-          className="absolute m-0 p-0 border-0 resize-none overflow-hidden outline outline-2 outline-blue-500 whitespace-pre"
+          className="absolute m-0 p-0 border-0 overflow-hidden outline outline-2 outline-blue-500 whitespace-pre cursor-text"
           style={editorStyle}
         />
       )}
