@@ -110,6 +110,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [letterSpacing, setLetterSpacing] = useState(0);
   const [italic, setItalic] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [outlineColor, setOutlineColor] = useState('#000000');
+  const [outlineWidth, setOutlineWidth] = useState(0);
 
   // 배경 관련 상태
   const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -141,6 +143,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       setLetterSpacing(selectedOverlay.letterSpacing || 0);
       setItalic(!!selectedOverlay.italic);
       setRotation(selectedOverlay.rotation || 0);
+      setOutlineColor(selectedOverlay.outlineColor || '#000000');
+      setOutlineWidth(selectedOverlay.outlineWidth || 0);
 
       const bg = selectedOverlay.backgroundColor;
       if (bg === 'rgba(0,0,0,0)' || bg === 'transparent') {
@@ -431,6 +435,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     return String(v);
   };
 
+  const changeOutlineWidth = (value: number) => {
+    const v = Math.max(0, Math.round(value * 10) / 10);
+    setOutlineWidth(v);
+    if (isEditing) updateSelectedOverlay({ outlineWidth: v, outlineColor });
+    return String(v);
+  };
+  const changeOutlineColor = (value: string) => {
+    setOutlineColor(value);
+    if (isEditing) updateSelectedOverlay({ outlineColor: value });
+  };
+
   const weightValue = parseWeight(fontWeight);
   const fontDef = getFontDef(fontFamily);
   const weightLabel = WEIGHT_LABELS[String(Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(weightValue / 100) * 100)))];
@@ -467,7 +482,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       hAlign,
       letterSpacing,
       italic,
-      rotation
+      rotation,
+      outlineColor,
+      outlineWidth
     });
   };
 
@@ -867,6 +884,38 @@ const Sidebar: React.FC<SidebarProps> = ({
             >
               <Italic size={14} /> 글자 기울이기
             </button>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">외곽선 (Outline)</label>
+                <div className="flex items-center gap-2">
+                  {outlineWidth !== 0 && (
+                    <button onClick={() => changeOutlineWidth(0)} className="text-[10px] text-slate-500 hover:text-slate-300" title="외곽선 없애기">없음</button>
+                  )}
+                  <input
+                    type="color"
+                    value={outlineColor}
+                    onChange={(e) => changeOutlineColor(e.target.value)}
+                    className="w-6 h-6 bg-transparent border-none p-0 cursor-pointer"
+                    aria-label="외곽선 색상"
+                    title="외곽선 색상"
+                  />
+                  {/* 입력 중에는 그대로 두고 Enter·포커스 아웃 때 적용 */}
+                  <NumberField value={outlineWidth} min={0} step={0.5} onCommit={changeOutlineWidth} label="외곽선 두께 값" />
+                  <span className="text-[10px] text-slate-500">px</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(10, Math.ceil((Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 16) * 0.15))}
+                step={0.5}
+                value={outlineWidth}
+                onChange={(e) => changeOutlineWidth(Number(e.target.value))}
+                className="w-full accent-blue-500 cursor-pointer"
+                aria-label="외곽선 두께"
+              />
+            </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">

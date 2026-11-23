@@ -490,6 +490,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       lineHeight: 1.2,
       letterSpacing: (ov.letterSpacing || 0) * zoom,
       color: ov.fontColor,
+      // 외곽선: 캔버스처럼 선을 글자 뒤에 깔아 바깥쪽만 보이게 한다
+      ...(ov.outlineWidth ? {
+        WebkitTextStroke: `${ov.outlineWidth * 2 * zoom}px ${ov.outlineColor || '#000000'}`,
+        paintOrder: 'stroke fill',
+      } : {}),
       background: ov.backgroundColor === 'rgba(0,0,0,0)' ? 'transparent' : ov.backgroundColor,
       textAlign: (ov.hAlign || 'left') as React.CSSProperties['textAlign'],
     } as React.CSSProperties;

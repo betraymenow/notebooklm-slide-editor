@@ -28,6 +28,8 @@ export interface TextOverlay {
   hAlign: HorizontalAlign;
   letterSpacing?: number;
   italic?: boolean;
+  outlineColor?: string; // 글자 외곽선 색
+  outlineWidth?: number; // 글자 외곽선 두께 (px, 0 이면 없음)
   rotation?: number; // 상자 가운데를 축으로 시계 방향 각도 (도)
   imageUrl?: string; // 있으면 글자 대신 이 그림을 상자 크기에 맞춰 그린다 (슬라이드 위에 끌어다 놓은 이미지)
 }

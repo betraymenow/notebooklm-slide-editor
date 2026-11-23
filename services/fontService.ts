@@ -190,6 +190,8 @@ export interface TextStyle {
   vAlign?: 'top' | 'middle' | 'bottom';
   italic?: boolean;
   rotation?: number;
+  outlineColor?: string;
+  outlineWidth?: number;
   rect: { x: number; y: number; width: number; height: number };
 }
 
@@ -272,6 +274,18 @@ export const drawOverlayText = (ctx: CanvasRenderingContext2D, ov: TextStyle) =>
   let ty = ov.rect.y;
   if (ov.vAlign === 'middle') ty = ov.rect.y + (ov.rect.height - totalTextHeight) / 2;
   else if (ov.vAlign === 'bottom') ty = ov.rect.y + ov.rect.height - totalTextHeight;
+
+  // 외곽선: 선의 절반은 글자 안쪽에 그려지므로 두 배 굵기로 먼저 긋고 그 위에 글자를 채운다
+  const outline = ov.outlineWidth || 0;
+  if (outline > 0) {
+    ctx.save();
+    ctx.strokeStyle = ov.outlineColor || '#000000';
+    ctx.lineWidth = outline * 2;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    lines.forEach((line, index) => ctx.strokeText(line, tx, ty + index * lineHeight));
+    ctx.restore();
+  }
 
   const stroke = extraStrokeWidth(ov.fontFamily, ov.fontWeight, ov.fontSize);
   if (stroke > 0) {
