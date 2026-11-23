@@ -614,6 +614,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2 || e.button === 3) return;
     const p = getCanvasCoords(e);
+    // 캔버스를 누르면 글자 일부 선택은 끝낸다 (남아 있으면 이후 설정이 그 글자에만 적용돼 안 바뀌는 것처럼 보인다)
+    if (textSel) onTextSelect?.(null);
 
     // 자르기 중: 손잡이 = 크기 조절, 영역 안 = 옮기기, 나머지 = 이미지 이동
     if (cropRect) {

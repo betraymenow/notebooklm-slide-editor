@@ -646,6 +646,15 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
 
           <div className="space-y-4">
+            {/* 글자 일부를 골라 둔 동안은 아래 설정을 내려도 계속 보이게 위에 붙여 둔다 */}
+            {isEditing && sel && (
+              <div className="sticky top-0 z-20 -mx-1 px-1 py-1 bg-[#1e293b]">
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/40 text-[11px] text-blue-200">
+                  <span className="min-w-0 truncate">고른 글자 <b className="text-white">"{selectedOverlay!.newText.slice(sel.start, sel.end)}"</b> 에만 적용돼요</span>
+                  <button onClick={() => onTextSelect(null)} className="shrink-0 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white">상자 전체</button>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">내용</label>
               <textarea 
@@ -660,16 +669,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onSelect={(e) => { if (selectedOverlayId) onTextSelect(toTextSelection(selectedOverlayId, e.currentTarget)); }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm h-24 resize-none focus:outline-none focus:border-blue-500 text-slate-200"
               />
-              {isEditing && (sel ? (
-                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/40 text-[11px] text-blue-200">
-                  <span className="min-w-0 truncate">고른 글자 <b className="text-white">"{selectedOverlay!.newText.slice(sel.start, sel.end)}"</b> 에만 적용돼요</span>
-                  <button onClick={() => onTextSelect(null)} className="shrink-0 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">상자 전체</button>
-                </div>
-              ) : (
+              {isEditing && !sel && (
                 <p className="text-[10px] text-slate-500 leading-snug">
                   글자 일부를 드래그로 고르면 글꼴·크기·색상·두께·기울이기·외곽선을 그 부분만 바꿀 수 있어요.
                 </p>
-              ))}
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
