@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { SlideData, Rect, Point, HandleType, TextOverlay } from '../types';
 import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, ROTATE_HANDLE_GAP, ROTATE_SNAP, normalizeAngle } from '../constants';
-import { applyOverlayRotation, drawOverlayText, loadFont, fontStack, resolveWeight } from '../services/fontService';
+import { applyOverlayRotation, drawOverlayImage, drawOverlayText, loadFont, fontStack, resolveWeight, OVERLAY_IMAGE_LOADED } from '../services/fontService';
 
 // 사각형의 8개 손잡이 위치 (모서리 4 + 변 가운데 4)
 const handlePoints = (r: Rect): Point[] => [
@@ -75,6 +75,18 @@ const resizeCrop = (r: Rect, handle: HandleType, dx: number, dy: number, ratio: 
     y: south ? anchorY : north ? anchorY - h : cy - h / 2,
     width: w,
     height: h,
+  };
+};
+
+// 모서리로 늘린 상자를 원래 비율로 맞춘다. 더 많이 늘린 쪽을 따르고, 잡은 모서리의 반대쪽 모서리는 제자리에 둔다
+const keepAspect = (from: Rect, to: Rect, handle: HandleType): Rect => {
+  const s = Math.max(to.width / from.width, to.height / from.height, MIN_RECT_SIZE / Math.min(from.width, from.height));
+  const width = from.width * s, height = from.height * s;
+  return {
+    x: handle.includes('w') ? from.x + from.width - width : from.x,
+    y: handle.includes('n') ? from.y + from.height - height : from.y,
+    width,
+    height,
   };
 };
 
@@ -289,6 +301,16 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     slide.overlays.forEach(overlay => {
       ctx.save();
       applyOverlayRotation(ctx, overlay);
+      if (overlay.imageUrl) {
+        drawOverlayImage(ctx, overlay);
+        if (overlay.id === selectedOverlayId) {
+          ctx.strokeStyle = COLORS.primary;
+          ctx.lineWidth = 2 / zoom;
+          ctx.strokeRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
+        }
+        ctx.restore();
+        return;
+      }
       ctx.fillStyle = overlay.backgroundColor;
       ctx.fillRect(overlay.rect.x, overlay.rect.y, overlay.rect.width, overlay.rect.height);
 
@@ -419,6 +441,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   }, [editingId]);
 
   const startEditing = (overlay: TextOverlay) => {
+    if (overlay.imageUrl) { onOverlaySelect(overlay.id); return; } // 겹친 이미지는 고칠 글자가 없다
     editOriginalRef.current = overlay.newText;
     onOverlaySelect(overlay.id);
     setEditingId(overlay.id);
@@ -490,14 +513,16 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     const onLoaded = () => setFontsVersion(v => v + 1);
     document.fonts.addEventListener('loadingdone', onLoaded);
     window.addEventListener('fontcalibrated', onLoaded); // 두께 보정 폭 측정이 끝났을 때
+    window.addEventListener(OVERLAY_IMAGE_LOADED, onLoaded); // 겹쳐 놓은 이미지를 다 읽었을 때
     return () => {
       document.fonts.removeEventListener('loadingdone', onLoaded);
       window.removeEventListener('fontcalibrated', onLoaded);
+      window.removeEventListener(OVERLAY_IMAGE_LOADED, onLoaded);
     };
   }, []);
 
   useEffect(() => {
-    slide.overlays.forEach(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText));
+    slide.overlays.forEach(ov => { if (!ov.imageUrl) loadFont(ov.fontFamily, ov.fontWeight, ov.newText); });
   }, [slide.overlays]);
 
   const getCanvasCoords = (e: React.MouseEvent | any): Point => {
@@ -688,9 +713,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
     const resize = overlayResizeRef.current;
     if (isResizingOverlay && resize && selectedOverlayId) {
-      const angle = slide.overlays.find(ov => ov.id === selectedOverlayId)?.rotation || 0;
+      const target = slide.overlays.find(ov => ov.id === selectedOverlayId);
+      const angle = target?.rotation || 0;
       const d = rotateVector(canvasP.x - resize.start.x, canvasP.y - resize.start.y, -angle);
-      const rect = resizedRect(resize.rect, resize.handle, d.x, d.y);
+      let rect = resizedRect(resize.rect, resize.handle, d.x, d.y);
+      // 겹친 이미지는 모서리를 끌면 가로세로 비율을 지킨다 (Shift 를 누르면 자유롭게)
+      if (target?.imageUrl && resize.handle.length === 2 && !e.shiftKey) rect = keepAspect(resize.rect, rect, resize.handle);
       // 돌아간 상자는 가운데가 움직인 방향도 돌려 줘야 반대쪽 변이 제자리에 남는다
       const before = rectCenter(resize.rect);
       const after = rectCenter(rect);

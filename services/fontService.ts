@@ -203,13 +203,50 @@ export const applyOverlayRotation = (ctx: CanvasRenderingContext2D, ov: Pick<Tex
   ctx.translate(-cx, -cy);
 };
 
-// 이미지 저장·PDF 저장용: 상자 배경과 글자를 회전까지 적용해 그린다
-export const drawOverlay = (ctx: CanvasRenderingContext2D, ov: TextStyle & { backgroundColor: string }) => {
+// ---------- 슬라이드 위에 겹쳐 놓은 이미지 ----------
+// 그릴 때마다 디코딩하지 않도록 주소별로 한 번만 읽어 둔다. 다 읽으면 편집 화면이 다시 그리도록 알린다
+const overlayImages = new Map<string, HTMLImageElement>();
+
+export const OVERLAY_IMAGE_LOADED = 'overlayimageloaded';
+
+export const getOverlayImage = (url: string) => {
+  let img = overlayImages.get(url);
+  if (!img) {
+    img = new Image();
+    img.onload = () => window.dispatchEvent(new Event(OVERLAY_IMAGE_LOADED));
+    img.src = url;
+    overlayImages.set(url, img);
+  }
+  return img;
+};
+
+const isReady = (img: HTMLImageElement) => img.complete && img.naturalWidth > 0;
+
+// 저장 전에 겹친 이미지를 모두 읽어 둔다 (안 읽힌 채로 그리면 빈 상자로 저장된다)
+export const loadOverlayImages = (overlays: { imageUrl?: string }[]) =>
+  Promise.all(overlays.filter(o => o.imageUrl).map(o => {
+    const img = getOverlayImage(o.imageUrl!);
+    return isReady(img) ? undefined : img.decode().catch(() => {});
+  }));
+
+// 회전은 부르는 쪽에서 적용한다
+export const drawOverlayImage = (ctx: CanvasRenderingContext2D, ov: { rect: TextStyle['rect']; imageUrl?: string }) => {
+  if (!ov.imageUrl) return;
+  const img = getOverlayImage(ov.imageUrl);
+  if (isReady(img)) ctx.drawImage(img, ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
+};
+
+// 이미지 저장·PDF 저장용: 상자 배경과 글자(또는 겹친 이미지)를 회전까지 적용해 그린다
+export const drawOverlay = (ctx: CanvasRenderingContext2D, ov: TextStyle & { backgroundColor: string; imageUrl?: string }) => {
   ctx.save();
   applyOverlayRotation(ctx, ov);
-  ctx.fillStyle = ov.backgroundColor;
-  ctx.fillRect(ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
-  drawOverlayText(ctx, ov);
+  if (ov.imageUrl) {
+    drawOverlayImage(ctx, ov);
+  } else {
+    ctx.fillStyle = ov.backgroundColor;
+    ctx.fillRect(ov.rect.x, ov.rect.y, ov.rect.width, ov.rect.height);
+    drawOverlayText(ctx, ov);
+  }
   ctx.restore();
 };
 

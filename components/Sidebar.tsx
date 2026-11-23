@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Rect, SlideData, TextOverlay, OCRResult, VerticalAlign, HorizontalAlign } from '../types';
 import { normalizeAngle } from '../constants';
 import { analyzeTextInImage, rankFontSamples } from '../services/geminiService';
-import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT } from '../services/fontService';
+import { FONT_CATALOG, FontDef, FontMatch, getFontDef, fontStack, loadFont, matchFont, estimateTextColor, ensureFontCss, renderSampleSheet, parseWeight, resolveWeight, MIN_WEIGHT, MAX_WEIGHT, getOverlayImage } from '../services/fontService';
 import { 
   Loader2, 
   Type as TypeIcon, 
@@ -23,7 +23,8 @@ import {
   Italic,
   RotateCw,
   Star,
-  Trash2
+  Trash2,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -471,6 +472,43 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const isEditing = !!selectedOverlayId;
+
+  // 슬라이드 위에 겹쳐 놓은 이미지: 글자 설정 대신 간단한 안내와 정리 버튼만
+  if (selectedOverlay?.imageUrl) {
+    const restoreAspect = () => {
+      const img = getOverlayImage(selectedOverlay.imageUrl!);
+      if (!img.naturalWidth) return;
+      const r = selectedOverlay.rect;
+      const height = r.width * (img.naturalHeight / img.naturalWidth);
+      updateSelectedOverlay({ rect: { ...r, y: r.y + (r.height - height) / 2, height } });
+    };
+    const btn = 'py-1.5 rounded border border-slate-700 bg-slate-900 hover:bg-slate-800 text-[11px] text-slate-300';
+    return (
+      <div className="flex-1 min-h-0 flex flex-col p-4 overflow-y-auto">
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <ImageIcon size={16} className="text-blue-400" /> 겹친 이미지
+          </h2>
+          <button
+            onClick={() => onDeleteOverlay(selectedOverlay.id)}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-slate-400 hover:text-rose-400 hover:bg-rose-900/20 transition-colors"
+            title="겹친 이미지 삭제 (Delete)"
+          >
+            <Trash2 size={13} /> 삭제
+          </button>
+        </div>
+        <p className="-mt-4 mb-5 text-[11px] text-slate-500 leading-relaxed">
+          이미지를 끌면 옮겨지고, <span className="text-slate-400">모서리 점</span>을 끌면 비율을 지키며 크기가 바뀌어요 (<span className="text-slate-400">Shift</span>를 누르면 자유롭게, 변 가운데 점은 한쪽만).
+          위의 <span className="text-slate-400">동그란 손잡이</span>로 돌리고, <span className="text-slate-400">방향키</span>로 1px씩 옮기고, <span className="text-slate-400">Delete</span> 키로 삭제해요.
+          이미지 저장·PDF 다운로드 때 겹친 그대로 저장돼요.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={restoreAspect} className={btn}>원래 비율로</button>
+          <button onClick={() => updateSelectedOverlay({ rotation: 0 })} className={btn} disabled={!selectedOverlay.rotation}>회전 0°</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 min-h-0 flex flex-col p-4 overflow-y-auto">

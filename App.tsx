@@ -6,8 +6,8 @@ import EditorCanvas, { toggleEditorFullscreen } from './components/EditorCanvas'
 import Sidebar from './components/Sidebar';
 import ImageTools from './components/ImageTools';
 import { CropAspect, ImageTransform, aspectRatio, cropSlide, fitCropToRatio, initialCropRect, transformSlide } from './services/imageTransform';
-import { drawOverlay, loadFont } from './services/fontService';
-import { NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
+import { drawOverlay, loadFont, loadOverlayImages } from './services/fontService';
+import { MIN_RECT_SIZE, NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
   Download, 
@@ -111,8 +111,14 @@ const App: React.FC = () => {
       e.preventDefault();
       depth = 0;
       setIsDragging(false);
-      const file = e.dataTransfer?.files[0];
-      if (file) loadFile(file);
+      const files = Array.from(e.dataTransfer?.files || []);
+      // 슬라이드가 열려 있으면 이미지는 그 위에 겹쳐 놓는다 (PDF 는 지금처럼 새 파일로 연다)
+      const images = files.filter(f => f.type.startsWith('image/'));
+      if (slidesRef.current.length > 0 && images.length > 0) {
+        images.forEach((f, i) => addImageRef.current(f, i));
+        return;
+      }
+      if (files[0]) loadFile(files[0]);
     };
     window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragover', onDragOver);
@@ -219,6 +225,43 @@ const App: React.FC = () => {
     setSelectedOverlayId(null);
   };
 
+  // 끌어다 놓은 이미지를 지금 슬라이드 가운데에 겹쳐 놓는다. 슬라이드보다 크면 슬라이드의 60% 안으로 줄인다.
+  // 여러 장이면 겹치지 않게 조금씩 비켜 놓는다
+  const addImageOverlay = (file: File, order = 0) => {
+    const idx = activeSlideIdx;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const slide = slidesRef.current[idx];
+        if (!slide) return;
+        const scale = Math.min(1, (slide.width * 0.6) / img.width, (slide.height * 0.6) / img.height);
+        const width = Math.max(MIN_RECT_SIZE, img.width * scale);
+        const height = Math.max(MIN_RECT_SIZE, img.height * scale);
+        const off = PASTE_OFFSET * order;
+        const overlay: TextOverlay = {
+          id: Math.random().toString(36).slice(2, 11),
+          rect: { x: (slide.width - width) / 2 + off, y: (slide.height - height) / 2 + off, width, height },
+          originalText: '', newText: '',
+          fontSize: 16, fontWeight: '400', fontColor: '#000000', fontFamily: 'Noto Sans KR',
+          backgroundColor: 'rgba(0,0,0,0)', vAlign: 'top', hAlign: 'left',
+          imageUrl: url,
+        };
+        commitSlides(prev => prev.map((s, i) => (i === idx ? { ...s, overlays: [...s.overlays, overlay] } : s)), 'addImage');
+        setCropAspect(null);
+        setSelection(null);
+        setSelectedOverlayId(overlay.id);
+      };
+      img.onerror = () => alert('이미지를 불러오지 못했습니다.');
+      img.src = url;
+    };
+    reader.readAsDataURL(file);
+  };
+  // 창 전체에 걸린 드롭 처리(처음 한 번만 등록)에서 항상 최신 슬라이드 번호로 부르도록
+  const addImageRef = useRef(addImageOverlay);
+  addImageRef.current = addImageOverlay;
+
   const handleClearOverlays = () => {
     if (!slides[activeSlideIdx]?.overlays.length) return;
     commitSlides(updateActiveOverlays(() => []), 'clear');
@@ -299,7 +342,7 @@ const App: React.FC = () => {
     commitSlides(updateActiveOverlays(ovs => [...ovs, pasted]), 'paste');
     setSelection(null);
     setSelectedOverlayId(pasted.id);
-    setEditRequestId(pasted.id); // 붙이자마자 그 자리에서 글자를 입력하도록
+    if (!pasted.imageUrl) setEditRequestId(pasted.id); // 붙이자마자 그 자리에서 글자를 입력하도록 (이미지는 그대로 복제)
   };
 
   // 단축키: Delete = 선택한 텍스트 상자 삭제, Ctrl+Z = 실행 취소, Ctrl+C/V = 상자 복사·붙여넣기
@@ -345,7 +388,10 @@ const App: React.FC = () => {
   }, [selectedOverlayId, activeSlideIdx]);
 
   const handleDownloadImages = async () => {
-    await Promise.all(slides.flatMap(s => s.overlays.map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))));
+    await Promise.all([
+      ...slides.flatMap(s => s.overlays.filter(ov => !ov.imageUrl).map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))),
+      ...slides.map(s => loadOverlayImages(s.overlays)),
+    ]);
     slides.forEach((slide, i) => {
       const canvas = document.createElement('canvas');
       canvas.width = slide.width;
@@ -404,7 +450,7 @@ const App: React.FC = () => {
         <aside className="w-[120px] border-r border-slate-700 bg-[#1e293b] flex flex-col p-3 gap-4 shrink-0">
           <div className="flex flex-col gap-2">
             <button onClick={handleUndo} disabled={!canUndo} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 hover:bg-slate-700 text-slate-300 text-xs font-medium disabled:opacity-30 disabled:hover:bg-slate-800/50" title="실행 취소 (Ctrl+Z)"><History size={18} />실행 취소</button>
-            <button onClick={handleClearOverlays} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 hover:bg-red-900/20 hover:text-red-400 text-slate-300 text-xs font-medium" title="이 슬라이드의 텍스트 상자 전체 삭제"><Trash2 size={18} />전체 삭제</button>
+            <button onClick={handleClearOverlays} className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700 hover:bg-red-900/20 hover:text-red-400 text-slate-300 text-xs font-medium" title="이 슬라이드의 텍스트 상자·겹친 이미지 전체 삭제"><Trash2 size={18} />전체 삭제</button>
           </div>
           {slides.length > 1 && (
             // 여러 장(PDF)일 때만 페이지 이동. PageUp / PageDown 키로도 넘긴다
@@ -488,7 +534,7 @@ const App: React.FC = () => {
           <div className="w-full h-full rounded-3xl border-4 border-dashed border-blue-400 flex flex-col items-center justify-center gap-4">
             <FileUp size={56} className="text-blue-300" />
             <p className="text-xl font-black text-white">여기에 놓으면 파일을 불러옵니다</p>
-            <p className="text-sm text-blue-200">PDF 또는 이미지{slides.length > 0 ? ' · 지금 작업 중인 슬라이드는 새 파일로 바뀝니다' : ''}</p>
+            <p className="text-sm text-blue-200">{slides.length > 0 ? '이미지는 지금 슬라이드 위에 겹쳐 놓고, PDF 는 새 파일로 엽니다' : 'PDF 또는 이미지'}</p>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 
 import { SlideData } from '../types';
-import { drawOverlay, loadFont } from './fontService';
+import { drawOverlay, loadFont, loadOverlayImages } from './fontService';
 
 declare const pdfjsLib: any;
 declare const jspdf: any;
@@ -64,7 +64,10 @@ export const downloadAsPdf = (slides: SlideData[], filename: string) => {
   };
 
   const saveAll = async () => {
-    await Promise.all(slides.flatMap(s => s.overlays.map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))));
+    await Promise.all([
+      ...slides.flatMap(s => s.overlays.filter(ov => !ov.imageUrl).map(ov => loadFont(ov.fontFamily, ov.fontWeight, ov.newText))),
+      ...slides.map(s => loadOverlayImages(s.overlays)),
+    ]);
     for (let i = 0; i < slides.length; i++) {
       await processSlide(slides[i], i);
     }
