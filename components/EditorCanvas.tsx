@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { SlideData, Rect, Point, HandleType, TextOverlay, TextSelection } from '../types';
 import { COLORS, HANDLE_SIZE, MIN_RECT_SIZE, MAX_ZOOM, MIN_ZOOM, ROTATE_HANDLE_GAP, ROTATE_SNAP, normalizeAngle } from '../constants';
+import { MosaicSettings, copyToCanvas, makePixelated, paintMosaic } from '../services/mosaic';
 import { lineFontSizes, makeTextSelection, overlayFontRequests, styleRuns, withNewText } from '../services/textStyle';
 
 // 서식 있는 편집칸의 글자. 줄바꿈이 <br> 로 들어가는 경우도 \n 으로 센다
@@ -140,6 +141,8 @@ interface EditorCanvasProps {
   onCropChange?: (rect: Rect) => void;
   textSel?: TextSelection | null;       // 글자 일부를 고른 범위 (옅은 파란 띠로 보여 준다)
   onTextSelect?: (sel: TextSelection | null) => void;
+  mosaic?: MosaicSettings | null;        // 있으면 왼쪽 드래그 = 모자이크 브러시
+  onMosaicCommit?: (dataUrl: string) => void; // 한 번 칠하기가 끝나면 바뀐 이미지
 }
 
 const EditorCanvas: React.FC<EditorCanvasProps> = ({ 
@@ -154,7 +157,9 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   cropRatio = null,
   onCropChange,
   textSel = null,
-  onTextSelect
+  onTextSelect,
+  mosaic = null,
+  onMosaicCommit
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -172,6 +177,15 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const [dragType, setDragType] = useState<'move' | HandleType | null>(null);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+  // ---------- 모자이크 브러시 ----------
+  // 칠하는 동안은 이미지 사본(work)에 바로 찍어 보여 주고, 손을 떼면 그 사본을 슬라이드 이미지로 넘긴다
+  const mosaicWorkRef = useRef<HTMLCanvasElement | null>(null);
+  const mosaicPixRef = useRef<{ canvas: HTMLCanvasElement; block: number; src: HTMLImageElement } | null>(null);
+  const mosaicLastRef = useRef<Point | null>(null);
+  const mosaickingRef = useRef(false); // 상태가 아닌 ref: 누르자마자 오는 이동 이벤트도 놓치지 않게
+  const [mosaicHover, setMosaicHover] = useState<Point | null>(null); // 브러시 크기 원을 그릴 위치
+  const [mosaicTick, setMosaicTick] = useState(0);
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [fontsVersion, setFontsVersion] = useState(0);
@@ -239,10 +253,26 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     const img = new Image();
     img.src = slide.dataUrl;
     img.onload = () => {
+      // 같은 슬라이드에서 크기가 그대로인 이미지 변경(모자이크 등)은 확대·이동한 화면을 그대로 둔다
+      const key = `${slide.index}:${img.width}x${img.height}`;
+      if (fitKeyRef.current !== key) fitToView(img);
+      fitKeyRef.current = key;
       setImage(img);
-      fitToView(img);
+      // 칠한 결과가 슬라이드 이미지에 들어왔으니 사본은 버린다 (벌써 다음 획을 칠하는 중이면 그 획이 끝날 때까지 둔다)
+      if (!mosaickingRef.current) {
+        mosaicWorkRef.current = null;
+        mosaicPixRef.current = null;
+      }
     };
   }, [slide.dataUrl]);
+  const fitKeyRef = useRef('');
+
+  // 모자이크를 끄면 숨겼던 마우스 커서와 브러시 원을 되돌린다
+  useEffect(() => {
+    if (mosaic) return;
+    setMosaicHover(null);
+    if (canvasRef.current?.style.cursor === 'none') canvasRef.current.style.cursor = 'grab';
+  }, [!!mosaic]);
 
   // 전체화면을 켜고 끌 때마다 바뀐 크기에 맞춰 다시 맞춤
   const imageRef = useRef(image);
@@ -324,7 +354,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     ctx.translate(offset.x, offset.y);
     ctx.scale(zoom, zoom);
 
-    ctx.drawImage(image, 0, 0);
+    ctx.drawImage(mosaicWorkRef.current || image, 0, 0);
 
     slide.overlays.forEach(overlay => {
       ctx.save();
@@ -435,8 +465,21 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
       drawHandles(selection);
     }
 
+    // 모자이크 브러시 크기 원 (밝은 곳·어두운 곳 모두 보이게 흰 선과 검은 선을 겹친다)
+    if (mosaic && mosaicHover) {
+      const r = mosaic.brush / 2;
+      ctx.beginPath();
+      ctx.arc(mosaicHover.x, mosaicHover.y, r, 0, Math.PI * 2);
+      ctx.lineWidth = 3 / zoom;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.stroke();
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    }
+
     ctx.restore();
-  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect, isRotatingOverlay, textSel]);
+  }, [image, slide.overlays, selection, zoom, offset, selectedOverlayId, fontsVersion, editingId, cropRect, isRotatingOverlay, textSel, mosaic, mosaicHover, mosaicTick]);
 
   // Esc = Ctrl + 드래그로 잡은 영역(아직 적용 전인 텍스트 상자) 취소
   useEffect(() => {
@@ -682,6 +725,23 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
     // 캔버스를 누르면 글자 일부 선택은 끝낸다 (남아 있으면 이후 설정이 그 글자에만 적용돼 안 바뀌는 것처럼 보인다)
     if (textSel) onTextSelect?.(null);
 
+    // 모자이크 중: 왼쪽 드래그 = 칠하기, Space·가운데 버튼 = 이미지 이동
+    if (mosaic) {
+      if (isSpacePressed || e.button !== 0) { startPan(e); return; }
+      if (!image) return;
+      const pix = mosaicPixRef.current;
+      if (!mosaicWorkRef.current) mosaicWorkRef.current = copyToCanvas(image, image.width, image.height);
+      // 칸 크기가 바뀌었거나 처음이면 뭉갠 그림을 새로 만든다 (지금 이미지 기준)
+      if (!pix || pix.block !== mosaic.block || pix.src !== image) {
+        mosaicPixRef.current = { canvas: makePixelated(image, image.width, image.height, mosaic.block), block: mosaic.block, src: image };
+      }
+      paintMosaic(mosaicWorkRef.current, mosaicPixRef.current!.canvas, p, p, mosaic.brush);
+      mosaicLastRef.current = p;
+      mosaickingRef.current = true;
+      setMosaicTick(t => t + 1);
+      return;
+    }
+
     // 자르기 중: 손잡이 = 크기 조절, 영역 안 = 옮기기, 나머지 = 이미지 이동
     if (cropRect) {
       if (isSpacePressed || e.button === 1) { startPan(e); return; }
@@ -751,6 +811,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const handleMouseMove = (e: React.MouseEvent) => {
     const screenP = getScreenCoords(e);
     const canvasP = getCanvasCoords(e);
+
+    if (mosaic) {
+      if (canvasRef.current) canvasRef.current.style.cursor = isPanning ? 'grabbing' : isSpacePressed ? 'grab' : 'none';
+      setMosaicHover(isPanning || isSpacePressed ? null : canvasP);
+      if (mosaickingRef.current && mosaicWorkRef.current && mosaicPixRef.current) {
+        paintMosaic(mosaicWorkRef.current, mosaicPixRef.current.canvas, mosaicLastRef.current || canvasP, canvasP, mosaic.brush);
+        mosaicLastRef.current = canvasP;
+        setMosaicTick(t => t + 1);
+        return;
+      }
+      if (!isPanning) return; // 아래의 일반 커서 설정이 브러시 커서를 덮지 않게 (이동 중일 때만 아래 이동 처리로)
+    }
 
     if (cropRect) {
       const drag = cropDragRef.current;
@@ -845,6 +917,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
   };
 
   const handleMouseUp = () => {
+    if (mosaickingRef.current) {
+      mosaickingRef.current = false;
+      mosaicLastRef.current = null;
+      if (mosaicWorkRef.current) onMosaicCommit?.(mosaicWorkRef.current.toDataURL('image/png'));
+    }
     if (isDrawing || isResizingSelection) {
       if (selection && (selection.width < MIN_RECT_SIZE || selection.height < MIN_RECT_SIZE)) {
         setSelection(null);
@@ -868,7 +945,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   return (
     <div ref={containerRef} id={STAGE_ID} className="flex-1 relative overflow-hidden bg-[#0f172a] flex items-center justify-center select-none">
-      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDoubleClick={handleDoubleClick} onContextMenu={(e) => { e.preventDefault(); toggleEditorFullscreen(); }} className="block w-full h-full" style={{ cursor: 'grab' }} />
+      <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setMosaicHover(null); }} onDoubleClick={handleDoubleClick} onContextMenu={(e) => { e.preventDefault(); toggleEditorFullscreen(); }} className="block w-full h-full" style={{ cursor: 'grab' }} />
       {editingOverlay && (
         // 글자 일부만 꾸민 모양까지 그대로 보이도록 서식 있는 편집칸을 쓴다.
         // 내용은 열 때 한 번만 채우고(입력 중 React 가 다시 그리면 커서·한글 조합이 깨진다) 입력할 때마다 글자만 읽어 간다

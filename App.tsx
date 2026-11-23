@@ -8,6 +8,7 @@ import ImageTools from './components/ImageTools';
 import { CropAspect, ImageTransform, aspectRatio, cropSlide, fitCropToRatio, initialCropRect, transformSlide } from './services/imageTransform';
 import { drawOverlay, loadFont, loadOverlayImages } from './services/fontService';
 import { overlayFontRequests } from './services/textStyle';
+import { DEFAULT_MOSAIC, MosaicSettings } from './services/mosaic';
 import { MIN_RECT_SIZE, NUDGE_STEP, NUDGE_STEP_FAST } from './constants';
 import { 
   FileUp, 
@@ -28,6 +29,7 @@ const ARROW_DELTA: Record<string, [number, number]> = {
 // 왼쪽 도구 열의 조작 안내 (자르기 중에는 자르기 조작으로 바뀐다)
 const HINTS: [string, string][] = [['Drag', '이미지 이동'], ['E D F S', '아래 / 위 / 왼쪽 / 오른쪽 이동'], ['Wheel', '확대 / 축소'], ['Ctrl + Drag', '영역 선택']];
 const CROP_HINTS: [string, string][] = [['모서리 Drag', '크기 조절'], ['안쪽 Drag', '영역 옮기기'], ['Wheel', '확대 / 축소']];
+const MOSAIC_HINTS: [string, string][] = [['Drag', '모자이크 칠하기'], ['Space + Drag', '이미지 이동'], ['Wheel', '확대 / 축소'], ['Ctrl + Z', '한 번 칠한 것 되돌리기']];
 
 // 상단 '파일 업로드'·'전체화면' 버튼 공통 모양 (크기·글씨 동일)
 const HEADER_TOOL_BTN = 'w-[136px] flex items-center justify-center gap-2 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-sm font-medium whitespace-nowrap border border-slate-600';
@@ -285,7 +287,26 @@ const App: React.FC = () => {
   // 슬라이드를 넘기거나 이미지가 바뀌면(자르기·회전·실행 취소) 자를 영역을 새로 잡는다
   useEffect(resetCrop, [activeSlideIdx, activeSlide?.dataUrl]);
 
+  // 모자이크 브러시: 켜져 있으면 설정값, 꺼져 있으면 null. 자르기와는 동시에 쓰지 않는다
+  const [mosaic, setMosaic] = useState<MosaicSettings | null>(null);
+  const lastMosaicRef = useRef<MosaicSettings>(DEFAULT_MOSAIC); // 껐다 켜도 마지막 크기를 기억
+  const handleMosaicChange = (next: MosaicSettings | null) => {
+    setMosaic(next);
+    if (next) {
+      lastMosaicRef.current = next;
+      setCropAspect(null);
+      setCropRect(null);
+      setSelection(null);
+      setSelectedOverlayId(null);
+    }
+  };
+  const handleMosaicCommit = (dataUrl: string) => {
+    const idx = activeSlideIdx;
+    commitSlides(prev => prev.map((s, i) => (i === idx ? { ...s, dataUrl } : s)), 'mosaic');
+  };
+
   const handleCropAspectChange = (aspect: CropAspect | null) => {
+    if (aspect) setMosaic(null);
     setCropAspect(aspect);
     // 자르기를 처음 켜면 이미지 전체, 이미 잡아 둔 영역이 있으면 그 영역을 유지한 채 비율만 맞춘다
     if (!aspect || !activeSlide) setCropRect(null);
@@ -468,7 +489,7 @@ const App: React.FC = () => {
           {slides.length > 0 && (
             <div className="bg-slate-800/50 rounded-xl border border-slate-700 px-3 py-3 flex flex-col gap-3">
               <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">조작 방법</h3>
-              {(cropRect ? CROP_HINTS : HINTS).map(([key, label]) => (
+              {(mosaic ? MOSAIC_HINTS : cropRect ? CROP_HINTS : HINTS).map(([key, label]) => (
                 <div key={key} className="flex flex-col items-start gap-1 text-xs">
                   <span className="bg-slate-700 px-1.5 py-0.5 rounded text-[10px] text-blue-400 font-bold whitespace-nowrap">{key}</span>
                   <span className="text-slate-300">{label}</span>
@@ -496,6 +517,8 @@ const App: React.FC = () => {
                 cropRect={cropRect}
                 cropRatio={cropAspect ? aspectRatio(cropAspect) : null}
                 onCropChange={setCropRect}
+                mosaic={mosaic}
+                onMosaicCommit={handleMosaicCommit}
                 textSel={textSel}
                 onTextSelect={setTextSel}
               />
@@ -524,6 +547,9 @@ const App: React.FC = () => {
             onApplyCrop={handleApplyCrop}
             onResetCrop={resetCrop}
             onTransform={handleTransform}
+            mosaic={mosaic}
+            lastMosaic={lastMosaicRef.current}
+            onMosaicChange={handleMosaicChange}
           />
         )}
         <Sidebar 

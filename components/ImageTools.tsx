@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Rect, SlideData } from '../types';
 import { CROP_ASPECTS, CropAspect, ImageTransform, aspectRatio } from '../services/imageTransform';
 import { MIN_RECT_SIZE } from '../constants';
-import { Crop, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2, ChevronDown, ChevronUp, RefreshCw, Loader2 } from 'lucide-react';
+import { MosaicSettings, MOSAIC_BLOCK_RANGE, MOSAIC_BRUSH_RANGE } from '../services/mosaic';
+import { Crop, RotateCcw, RotateCw, FlipHorizontal2, FlipVertical2, ChevronDown, ChevronUp, RefreshCw, Loader2, Grid3x3 } from 'lucide-react';
 
 interface ImageToolsProps {
   slide: SlideData;
@@ -14,6 +15,9 @@ interface ImageToolsProps {
   onApplyCrop: () => void;
   onResetCrop: () => void;
   onTransform: (op: ImageTransform) => void;
+  mosaic: MosaicSettings | null;          // null = 모자이크 브러시 꺼짐
+  lastMosaic: MosaicSettings;             // 다시 켤 때 쓸 마지막 설정
+  onMosaicChange: (m: MosaicSettings | null) => void;
 }
 
 // 입력 중에는 그대로 두고 Enter·포커스 이동 때 반영하는 숫자 칸
@@ -50,7 +54,26 @@ const Section: React.FC<{ title: string; icon: React.ReactNode; open: boolean; o
   </div>
 );
 
-const ImageTools: React.FC<ImageToolsProps> = ({ slide, cropAspect, cropRect, busy, onCropAspectChange, onCropChange, onApplyCrop, onResetCrop, onTransform }) => {
+// 슬라이더 + 숫자 (모자이크 브러시 크기·칸 크기)
+const RangeRow: React.FC<{ label: string; value: number; min: number; max: number; onChange: (v: number) => void }> = ({ label, value, min, max, onChange }) => (
+  <div className="space-y-1">
+    <div className="flex items-center justify-between text-[11px] text-slate-400">
+      <span>{label}</span>
+      <span className="font-mono text-slate-300">{value}px</span>
+    </div>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      value={value}
+      onChange={e => onChange(Number(e.target.value))}
+      aria-label={label}
+      className="w-full accent-blue-500 cursor-pointer"
+    />
+  </div>
+);
+
+const ImageTools: React.FC<ImageToolsProps> = ({ slide, cropAspect, cropRect, busy, onCropAspectChange, onCropChange, onApplyCrop, onResetCrop, onTransform, mosaic, lastMosaic, onMosaicChange }) => {
   const [rotateOpen, setRotateOpen] = useState(false);
   const ratio = cropAspect ? aspectRatio(cropAspect) : null;
 
@@ -129,6 +152,23 @@ const ImageTools: React.FC<ImageToolsProps> = ({ slide, cropAspect, cropRect, bu
           ))}
         </div>
         <p className="text-[10px] text-slate-500">누르면 바로 적용돼요. 되돌리려면 Ctrl+Z</p>
+      </Section>
+
+      <Section
+        title="모자이크"
+        icon={<Grid3x3 size={14} className="text-blue-400" />}
+        open={mosaic !== null}
+        onToggle={() => onMosaicChange(mosaic ? null : lastMosaic)}
+      >
+        {mosaic && (
+          <>
+            <RangeRow label="브러시 크기" value={mosaic.brush} min={MOSAIC_BRUSH_RANGE.min} max={MOSAIC_BRUSH_RANGE.max} onChange={brush => onMosaicChange({ ...mosaic, brush })} />
+            <RangeRow label="모자이크 칸 크기" value={mosaic.block} min={MOSAIC_BLOCK_RANGE.min} max={MOSAIC_BLOCK_RANGE.max} onChange={block => onMosaicChange({ ...mosaic, block })} />
+            <p className="text-[10px] text-slate-500 leading-snug">
+              이미지 위를 끌어서 칠하면 그 자리가 모자이크돼요. 한 번 칠할 때마다 Ctrl+Z 로 되돌릴 수 있어요. 텍스트 상자·겹친 이미지는 모자이크되지 않아요. 다 칠했으면 이 칸을 닫아 끄세요.
+            </p>
+          </>
+        )}
       </Section>
     </div>
   );
